@@ -333,7 +333,8 @@ manages the queue and stops tasks:
 ```bash
 curl -X POST 127.0.0.1:3000/pair/request -d '{"agentName":"my-script"}'
 # Flint shows a PIN; the program sends it to /pair/confirm and gets a token,
-# once: it stays valid across restarts until /paired revoke my-script.
+# which stays valid across restarts for a day (FLINT_PAIRING_TTL_HOURS)
+# or until /paired revoke my-script.
 curl -X POST 127.0.0.1:3000/message \
   -H "Authorization: Bearer <token>" \
   -d '{"content":"What files changed today?"}'

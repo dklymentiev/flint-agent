@@ -7,6 +7,14 @@ All notable changes to Flint are written here. The format follows
 Each version is a `## [x.y.z] - YYYY-MM-DD` heading: `/update` reads these
 headings to show what changed between your version and the newest one.
 
+## [1.14.3] - 2026-10-03
+
+### Security
+- A paired program's token is accepted for a day, then the program pairs
+  again. `FLINT_PAIRING_TTL_HOURS` sets another lifetime and `0` keeps
+  pairings for good. Pairings made earlier expire by the same rule, and
+  `/paired` shows when each one ends.
+
 ## [1.14.2] - 2026-10-02
 
 ### Fixed

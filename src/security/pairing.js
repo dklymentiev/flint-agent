@@ -9,12 +9,54 @@ const MAX_ATTEMPTS = 3;
 const MAX_SESSIONS = 5;
 const PIN_EXPIRY_MS = 180_000; // 3 minutes
 
+// A pairing lives a day unless the owner says otherwise (owner, 2026-10-03).
+// Calls through the API run tools without asking, so a program paired once
+// and then forgotten must not still be able to drive Flint a month later.
+const DEFAULT_PAIRING_TTL_HOURS = 24;
+
+/**
+ * Pairing lifetime in ms, or null for "does not expire" (FLINT_PAIRING_TTL_HOURS=0).
+ * Read per call so the setting can change without a new pairing. A value that
+ * is not a number means the default, never "no expiry": a typo must not turn
+ * expiry off.
+ */
+function pairingTtlMs() {
+  const raw = process.env.FLINT_PAIRING_TTL_HOURS;
+  const hours = raw === undefined || raw.trim() === "" ? DEFAULT_PAIRING_TTL_HOURS : Number(raw);
+  if (!Number.isFinite(hours) || hours < 0) return DEFAULT_PAIRING_TTL_HOURS * 3_600_000;
+  return hours === 0 ? null : hours * 3_600_000;
+}
+
+/**
+ * When a pairing stops being accepted, in ms, or null if it does not expire.
+ * Counted from pairedAt with the setting in force now, so a pairing made
+ * before lifetimes existed expires like any other. A record whose pairedAt
+ * cannot be read counts as expired.
+ */
+function expiryOf(client) {
+  const ttl = pairingTtlMs();
+  if (ttl === null) return null;
+  const paired = Date.parse(client.pairedAt);
+  return Number.isFinite(paired) ? paired + ttl : 0;
+}
+
+/** Forget the pairings whose lifetime is over. */
+function dropExpiredClients() {
+  const now = Date.now();
+  const before = loadClients().length;
+  clients = clients.filter((c) => {
+    const at = expiryOf(c);
+    return at === null || now < at;
+  });
+  if (clients.length !== before) saveClients();
+}
+
 /** @type {Map<string, object>} */
 const sessions = new Map();
 
 // Paired programs, kept across restarts (owner, 2026-10-02): pairing is the
 // only way into the HTTP API by default, so it has to be once per program,
-// not once per run. Only a SHA-256 of each token is written, so the file
+// not once per run. Each pairing has a lifetime, see pairingTtlMs(). Only a SHA-256 of each token is written, so the file
 // grants nothing to whoever reads it. The path is resolved per call, so a
 // test's sandboxed home is honoured.
 const flintDir = () => join(homedir(), ".flint");
@@ -130,6 +172,7 @@ export function cleanExpiredSessions() {
 
 export function isPairedToken(token) {
   if (!token) return false;
+  dropExpiredClients();
   const h = Buffer.from(hashOf(token), "hex");
   return loadClients().some((c) => {
     const k = Buffer.from(c.hash, "hex");
@@ -137,9 +180,18 @@ export function isPairedToken(token) {
   });
 }
 
-/** Paired programs, without their hashes. */
+/** Paired programs, without their hashes. expiresAt is null when pairings do not expire. */
 export function listPairedClients() {
-  return loadClients().map(({ name, address, pairedAt }) => ({ name, address, pairedAt }));
+  dropExpiredClients();
+  return loadClients().map((c) => {
+    const at = expiryOf(c);
+    return {
+      name: c.name,
+      address: c.address,
+      pairedAt: c.pairedAt,
+      expiresAt: at === null ? null : new Date(at).toISOString(),
+    };
+  });
 }
 
 /**

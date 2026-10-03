@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import {
   generatePin,
   createPairingSession,
@@ -7,6 +7,7 @@ import {
   isPairedToken,
   revokePairedToken,
   revokeAllPairedTokens,
+  listPairedClients,
   getActiveSessions,
   _reset,
 } from "../../../src/security/pairing.js";
@@ -187,6 +188,73 @@ describe("Pairing Protocol", () => {
 
     it("does not throw when no tokens exist", () => {
       expect(() => revokeAllPairedTokens()).not.toThrow();
+    });
+  });
+
+  // A pairing is not for ever: a program paired once must not keep driving
+  // Flint a month later because nobody remembered to revoke it.
+  describe("pairing lifetime", () => {
+    const HOUR = 60 * 60 * 1000;
+    const start = new Date("2026-10-03T12:00:00Z");
+
+    const pair = () => {
+      const s = createPairingSession("127.0.0.1");
+      return verifyPin(s.sessionId, s.pin, { name: "probe" }).token;
+    };
+
+    beforeEach(() => {
+      vi.useFakeTimers();
+      vi.setSystemTime(start);
+      delete process.env.FLINT_PAIRING_TTL_HOURS;
+    });
+
+    afterEach(() => {
+      vi.useRealTimers();
+      delete process.env.FLINT_PAIRING_TTL_HOURS;
+    });
+
+    it("accepts a token for a day by default and refuses it after", () => {
+      const token = pair();
+      vi.setSystemTime(start.getTime() + 23 * HOUR);
+      expect(isPairedToken(token)).toBe(true);
+      vi.setSystemTime(start.getTime() + 24 * HOUR + 1000);
+      expect(isPairedToken(token)).toBe(false);
+    });
+
+    it("takes the lifetime from FLINT_PAIRING_TTL_HOURS", () => {
+      process.env.FLINT_PAIRING_TTL_HOURS = "2";
+      const token = pair();
+      vi.setSystemTime(start.getTime() + 1 * HOUR);
+      expect(isPairedToken(token)).toBe(true);
+      vi.setSystemTime(start.getTime() + 2 * HOUR + 1000);
+      expect(isPairedToken(token)).toBe(false);
+    });
+
+    it("keeps a pairing for good only when the setting is 0", () => {
+      process.env.FLINT_PAIRING_TTL_HOURS = "0";
+      const token = pair();
+      vi.setSystemTime(start.getTime() + 24 * 365 * HOUR);
+      expect(isPairedToken(token)).toBe(true);
+    });
+
+    it("falls to a day, not to no expiry, when the setting is not a number", () => {
+      process.env.FLINT_PAIRING_TTL_HOURS = "forever";
+      const token = pair();
+      vi.setSystemTime(start.getTime() + 24 * HOUR + 1000);
+      expect(isPairedToken(token)).toBe(false);
+    });
+
+    it("drops an expired pairing from the list", () => {
+      pair();
+      expect(listPairedClients()).toHaveLength(1);
+      vi.setSystemTime(start.getTime() + 24 * HOUR + 1000);
+      expect(listPairedClients()).toHaveLength(0);
+    });
+
+    it("says when a pairing expires", () => {
+      pair();
+      const [client] = listPairedClients();
+      expect(client.expiresAt).toBe(new Date(start.getTime() + 24 * HOUR).toISOString());
     });
   });
 });

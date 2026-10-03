@@ -1,7 +1,7 @@
 # Flint Agent -- Technical Reference
 
-**Version:** 1.14.2
-**Checked against the code:** 2026-10-02
+**Version:** 1.14.3
+**Checked against the code:** 2026-10-03
 **Source:** The main exported functions, tools, endpoints, commands and config options in `src/`
 
 ---
@@ -1340,11 +1340,11 @@ PIN-based authentication protocol for peer agents.
 
 #### `verifyPin(sessionId, candidatePin, { name?, address? })` -> `{ valid, token? }|{ valid, error }`
 
-Constant-time PIN comparison. On success, returns a 64-char hex bearer token and stores its SHA-256 with the name, address and time in `~/.flint/paired-clients.json`, so the pairing survives restarts.
+Constant-time PIN comparison. On success, returns a 64-char hex bearer token and stores its SHA-256 with the name, address and time in `~/.flint/paired-clients.json`, so the pairing survives restarts. It is accepted for `FLINT_PAIRING_TTL_HOURS` (24 by default, `0` for no expiry) counted from the pairing time; a value that is not a number means the default.
 
 #### `isPairedToken(token)` / `listPairedClients()` / `revokePairedClients(name | "all")` / `revokePairedToken(token)` / `revokeAllPairedTokens()`
 
-Token management. `/paired` and `/paired revoke <name>` use the list and revoke functions.
+Token management. `/paired` and `/paired revoke <name>` use the list and revoke functions. `isPairedToken` and `listPairedClients` first drop the pairings whose lifetime is over and rewrite the file; the list carries `expiresAt` (null when pairings do not expire).
 
 ### `src/security/persona-guard.js`
 

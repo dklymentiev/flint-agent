@@ -326,7 +326,8 @@ export function registerCommands(store) {
       log("");
       log(chalk.cyan(`  Paired programs: ${list.length}`));
       for (const c of list) {
-        log(`  ${chalk.white(c.name)} ${chalk.gray(`from ${c.address}, paired ${c.pairedAt.slice(0, 16).replace("T", " ")}`)}`);
+        const until = c.expiresAt ? `, expires ${c.expiresAt.slice(0, 16).replace("T", " ")} UTC` : ", does not expire";
+        log(`  ${chalk.white(c.name)} ${chalk.gray(`from ${c.address}, paired ${c.pairedAt.slice(0, 16).replace("T", " ")}${until}`)}`);
       }
       log(chalk.gray("  /paired revoke <name> or /paired revoke all"));
       log("");

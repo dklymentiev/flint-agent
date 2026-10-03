@@ -48,6 +48,7 @@ describe("API access by default", () => {
   let savedEnv;
   beforeEach(async () => {
     savedEnv = { file: process.env.FLINT_API_TOKEN_FILE, secret: process.env.AGENT_PAIRING_SECRET };
+    delete process.env.FLINT_PAIRING_TTL_HOURS;
     delete process.env.FLINT_API_TOKEN_FILE;
     delete process.env.AGENT_PAIRING_SECRET;
     fs.rmSync(tokenFile(), { force: true });
@@ -86,6 +87,30 @@ describe("API access by default", () => {
 
     ({ pairing, auth } = await freshModules()); // a restart: module state gone
     expect(auth.createAuthMiddleware(null)(req(`Bearer ${token}`), res())).toBe(true);
+  });
+
+  it("refuses a paired program once its day is over and forgets it on disk", async () => {
+    // The pairing is a day long by default: a program paired once and then
+    // forgotten must not still be let in a month later.
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date("2026-10-03T12:00:00Z"));
+      let { pairing, auth } = await freshModules();
+      const token = await pairOnce(pairing);
+      const file = path.join(flintDir(), "paired-clients.json");
+
+      vi.setSystemTime(new Date("2026-10-04T11:00:00Z"));
+      expect(auth.createAuthMiddleware(null)(req(`Bearer ${token}`), res())).toBe(true);
+
+      vi.setSystemTime(new Date("2026-10-04T12:00:01Z"));
+      ({ pairing, auth } = await freshModules()); // a restart does not renew it
+      const r = res();
+      expect(auth.createAuthMiddleware(null)(req(`Bearer ${token}`), r)).toBe(false);
+      expect(r.statusCode).toBe(403);
+      expect(fs.readFileSync(file, "utf8")).not.toContain("my-script");
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("stores the paired token only as a hash", async () => {

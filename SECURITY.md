@@ -61,7 +61,8 @@ Its guards lower the risk; they are not a sandbox. Known limits, not bugs:
 - **The HTTP API** listens on 127.0.0.1 only, and a program gets in only by
   pairing with a PIN you see in the console. Paired programs get tools
   approved without asking (`AGENT_API_AUTO_APPROVE=0` turns that off), so
-  pair only programs you trust and revoke them with `/paired revoke`.
+  pair only programs you trust and revoke them with `/paired revoke`. A
+  pairing ends by itself after a day (`FLINT_PAIRING_TTL_HOURS`).
   `FLINT_API_TOKEN_FILE=1` also accepts a token file that any program
   running as your user can read; it is meant for automation, not for a
   machine you work on.

@@ -487,7 +487,7 @@ Listens on `127.0.0.1`, port 3000 by default. CORS allows `localhost` and `127.0
 | POST | `/pair/request` | Start PIN pairing (no token needed) |
 | POST | `/pair/confirm` | Confirm the PIN and get a token (no token needed) |
 
-Tools called through the API run without asking (`AGENT_API_AUTO_APPROVE=0` turns that off). Plugin installs still ask. That is why nothing gets in without pairing: `/paired` lists paired programs, `/paired revoke <name>` (or `all`) removes them. Only the hash of each token is stored, in `~/.flint/paired-clients.json`.
+Tools called through the API run without asking (`AGENT_API_AUTO_APPROVE=0` turns that off). Plugin installs still ask. That is why nothing gets in without pairing: `/paired` lists paired programs, `/paired revoke <name>` (or `all`) removes them. Only the hash of each token is stored, in `~/.flint/paired-clients.json`. A pairing lasts a day and survives restarts within it; after that the program pairs again. `FLINT_PAIRING_TTL_HOURS` sets another lifetime, and `0` means pairings do not expire. `/paired` shows when each one ends.
 
 Automation that starts its own Flint can set `FLINT_API_TOKEN_FILE=1`: Flint then also accepts the token it writes to `~/.flint/api-token.json` (renewed after 30 days). Any program running as your user can read that file, so leave it off on a machine you work on.
 
@@ -529,6 +529,7 @@ Set in the environment or in `.env` in Flint's folder. Selected variables:
 | `AGENT_PROFILE` | `generic` | Profile at start (same as `--profile`) |
 | `AGENT_API_AUTO_APPROVE` | on | `0`: API callers get approval questions too |
 | `FLINT_API_TOKEN_FILE` | off | `1`: also accept the token in `~/.flint/api-token.json` (automation; see API Authentication) |
+| `FLINT_PAIRING_TTL_HOURS` | `24` | How long a paired program's token is accepted, in hours; `0`: pairings do not expire |
 | `MCP_SERVERS` | none | MCP servers (`name\|transport\|url,...`) |
 | `MEMORY_API_URL` | none | Mesh memory API endpoint |
 | `AGENT_SECURITY_POLICY` | `normal` | `strict`, `normal` or `permissive` |
