@@ -15,7 +15,9 @@ describe("the npm package", () => {
     }
   });
 
+  // Without "./": npm 11 rewrote "./bin/flint.js" on publish and warned that
+  // package.json had errors (1.14.0).
   it("has the flint command", () => {
-    expect(pkg.bin.flint).toBe("./bin/flint.js");
+    expect(pkg.bin.flint).toBe("bin/flint.js");
   });
 });

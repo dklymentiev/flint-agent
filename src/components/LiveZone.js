@@ -221,7 +221,7 @@ export function statusText(state) {
   }
   parts.push(formatStatusLevel());
   if (state.spendLevel) parts.push(`spend: ${state.spendLevel}`);
-  if (state.freeQuota) parts.push(`free ${state.freeQuota.used}/${state.freeQuota.limit}`);
+  if (state.freeLimit != null) parts.push(`free ${state.freeUsed}/${state.freeLimit}`);
   parts.push("/help");
   return ` ${parts.join("  |  ")}`;
 }

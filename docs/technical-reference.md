@@ -1,6 +1,6 @@
 # Flint Agent -- Technical Reference
 
-**Version:** 1.14.0
+**Version:** 1.14.1
 **Checked against the code:** 2026-10-02
 **Source:** The main exported functions, tools, endpoints, commands and config options in `src/`
 

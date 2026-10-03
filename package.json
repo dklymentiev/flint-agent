@@ -1,6 +1,6 @@
 {
   "name": "flint-agent",
-  "version": "1.14.0",
+  "version": "1.14.1",
   "description": "A lightweight AI agent for the terminal that works with any LLM, free tiers included: files, commands, web, MCP",
   "type": "module",
   "main": "src/index.js",
@@ -36,7 +36,7 @@
     "vitest": "^4.0.18"
   },
   "bin": {
-    "flint": "./bin/flint.js"
+    "flint": "bin/flint.js"
   },
   "engines": {
     "node": ">=22.12.0"

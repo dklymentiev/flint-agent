@@ -7,6 +7,17 @@ All notable changes to Flint are written here. The format follows
 Each version is a `## [x.y.z] - YYYY-MM-DD` heading: `/update` reads these
 headings to show what changed between your version and the newest one.
 
+## [1.14.1] - 2026-10-02
+
+### Fixed
+- Free mode no longer crashes the console. After `/model free` or
+  `/model free auto` chose a model, Flint stopped with React error #185, and
+  then on every start, because the chosen models are remembered. The status
+  line built its free-request counter as a new object on each check, so the
+  screen redrew without end.
+- `bin` in package.json written the way npm expects, so publishing no longer
+  warns that it was corrected.
+
 ## [1.14.0] - 2026-10-02
 
 ### Added

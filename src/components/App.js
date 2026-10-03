@@ -112,7 +112,11 @@ export function App({ store, onSubmit, onAbort, onQuit, onClipboard, onRecallQue
     careLevel: s._careLevel || null,
     spendLevel: s._spendLevel || getSpendLevel(),
     // Free mode: requests made today with a free model, of the daily limit.
-    freeQuota: config.freeChain ? { used: freeUsedToday(), limit: s._freeLimit || savedFreeLimit() } : null,
+    // Two plain numbers, not an object: the selector runs on every store
+    // check, and a fresh object each time never compares equal, so React
+    // re-rendered forever (error #185) as soon as free mode was on.
+    freeUsed: config.freeChain ? freeUsedToday() : null,
+    freeLimit: config.freeChain ? s._freeLimit || savedFreeLimit() : null,
   }));
   const { inputHistory } = ui;
 
