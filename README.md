@@ -286,7 +286,8 @@ network addresses are refused, outside content is screened for prompt
 injection, child agents inherit the blocked paths and cannot nest deeper than
 five levels, and every tool call goes to an audit log.
 `/permissions`, `/allow <tool>`, `/deny <tool>` and `/confirm <tool>` set
-single tools; `/allow-all` skips confirmations for the session.
+single tools; `/allow-all` skips confirmations for the session. For an MCP tool, `[s]`
+at the prompt allows that whole server.
 
 These guards reduce risk; they do not make running an AI agent with your
 permissions safe in every case. Read what it asks before you answer. See

@@ -381,10 +381,11 @@ export function printError(text) {
  * One history line for an answered approval. The question itself is shown
  * only in the live zone while it waits (components/LiveZone.js).
  */
-export function printConfirmResult(type, toolName = "", argsText = "") {
+export function printConfirmResult(type, toolName = "", argsText = "", server = "") {
   const what = `${toolName}${argsText ? " " + argsText : ""}`.slice(0, 100);
   if (type === "allow") addLine(chalk.green("  + ") + chalk.dim(what));
   else if (type === "always") addLine(chalk.green("  + ") + chalk.dim(what) + chalk.green(" (always)"));
+  else if (type === "server") addLine(chalk.green("  + ") + chalk.dim(what) + chalk.green(` (always, all of ${server})`));
   else addLine(chalk.red("  x denied ") + chalk.dim(what));
 }
 

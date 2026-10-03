@@ -24,6 +24,10 @@ const RESTART_CODE = 42;
 // restart names its own session, so the operator's --new/--last/--session
 // from the first start are left out of the args then.
 let resumeSessionId = null;
+// /allow-all or /deny-all of the process that asked for the restart, held here
+// until the next one is ready and then handed over once (src/restart.js says
+// why it travels this way and is never written down).
+let carriedBulkPermission = null;
 function withoutSessionArgs(args) {
   const out = [];
   for (let i = 0; i < args.length; i++) {
@@ -106,9 +110,14 @@ function start(extraArgs = []) {
   child.on("message", (msg) => {
     if (msg && msg.type === "flint:ready") {
       releaseTerminal();
-      try { child.send({ type: "flint:released" }); } catch {}
+      const bulkPermission = carriedBulkPermission;
+      carriedBulkPermission = null;
+      try { child.send({ type: "flint:released", ...(bulkPermission ? { bulkPermission } : {}) }); } catch {}
     }
-    if (msg && msg.type === "flint:restart" && typeof msg.sessionId === "string") resumeSessionId = msg.sessionId;
+    if (msg && msg.type === "flint:restart" && typeof msg.sessionId === "string") {
+      resumeSessionId = msg.sessionId;
+      carriedBulkPermission = msg.bulkPermission === "allow" || msg.bulkPermission === "deny" ? msg.bulkPermission : null;
+    }
   });
 
   // `exit` always arrives, and it must stop the interval even if the child

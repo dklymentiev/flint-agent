@@ -66,7 +66,7 @@ function initStore() {
   initRegistry(store);
   initCommands(store);
   initPermissions({
-    confirm: (toolName, args) => new Promise((resolve) => {
+    confirm: (toolName, args, opts = {}) => new Promise((resolve) => {
       // Announce the wait, so a prompt that needs the operator reaches one
       // rather than sitting in a window nobody is looking at. Start before the
       // prompt is stored and stop when it is answered — including on the
@@ -97,7 +97,7 @@ function initStore() {
         store.getState().addLine(chalk.yellow(`  ? ${toolName} asks for approval, full command:`));
         for (const l of argLines) store.getState().addLine(l);
       }
-      store.getState().setPendingConfirmation({ id: Date.now(), toolName, args, argsText, resolve: wrappedResolve });
+      store.getState().setPendingConfirmation({ id: Date.now(), toolName, args, argsText, server: opts.server || null, resolve: wrappedResolve });
       // permissions.js gives up after its window; take the question off the
       // screen at the same moment, or the input would stay waiting for y/n.
       timer = setTimeout(() => wrappedResolve("timeout"), getConfirmTimeoutMs());

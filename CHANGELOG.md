@@ -7,6 +7,35 @@ All notable changes to Flint are written here. The format follows
 Each version is a `## [x.y.z] - YYYY-MM-DD` heading: `/update` reads these
 headings to show what changed between your version and the newest one.
 
+## [1.14.4] - 2026-10-03
+
+### Changed
+- An approval prompt for an MCP tool offers `[s]`: always, for every tool of
+  that server. Before, "always" covered one tool and each of a server's
+  other tools asked again. A rule for a single tool still wins.
+- `/allow-all` and `/deny-all` are kept by a restart of the same session
+  (`/restart`, `/update`, a restart over the API). They are still never
+  written to disk, and a new session starts without them.
+- `/reset-permissions` also turns `/allow-all` and `/deny-all` off.
+
+### Added
+- MCP servers with headers in the console: `~/.flint/mcp.json`, in the
+  common `mcpServers` format, is read at start beside `MCP_SERVERS`. A header
+  value may name a secret as `${NAME}`; one that is not found stops that
+  one server with a message, and no empty header is sent. Before, a server
+  that wanted a token in `Authorization` could be configured only in stdio
+  mode.
+- `/mcp-secret <NAME>` stores such a secret in the encrypted key store,
+  typed into a masked box. `${NAME}` is looked up there first and in the
+  environment second.
+
+### Fixed
+- In a table, `**bold**` and `` `code` `` are shown as bold and code instead
+  of with their markers, and column widths are measured on what is visible.
+- A table cell too long for its column is cut to the column's width. It
+  used to come out two characters wider, which pushed the row's closing bar
+  onto the next line.
+
 ## [1.14.3] - 2026-10-03
 
 ### Security

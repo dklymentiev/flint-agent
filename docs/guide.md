@@ -67,6 +67,7 @@ The console has no tabs. History is ordinary terminal scrollback: each line is w
 | **Alt+V** | Paste the clipboard into the input: a picture becomes `[Image #N]` and is sent with the text around it. Ctrl+V does the same where the terminal passes the key through; in most terminals Ctrl+V is the terminal's own paste and sends nothing for a picture |
 | **Ctrl+T** | Show or hide the model's thinking blocks of this session |
 | **y / n / a** | Answer an approval: yes, no, always. Esc means no |
+| **s** | On an approval for an MCP tool: always, for every tool of that server |
 
 In the `/provider` pick list: Up/Down, Enter, Esc to go back, Ctrl+S to change the sort order.
 
@@ -195,7 +196,7 @@ When a tool returns a table, Flint stores it as a named dataset (`ds_1`, `ds_2`,
 | `/allow <tool>` | Run a tool without asking |
 | `/deny <tool>` | Block a tool |
 | `/confirm <tool>` | Ask before running a tool |
-| `/allow-all` | Allow all tools |
+| `/allow-all` | Allow all tools. Kept in memory only; a restart of the same session keeps it, a new session starts without it |
 | `/deny-all` | Deny all tools |
 | `/reset-permissions` | Back to the defaults |
 
@@ -207,7 +208,7 @@ Three permission values:
 | **confirm** | Ask first. An unanswered question is refused after 10 minutes |
 | **deny** | Block |
 
-A tool's default comes from a built-in table and is then adjusted by the care level (see `/careful`). A tool not in the table, such as one from an MCP server or a plugin, defaults to confirm. Per-tool settings and "always" answers are saved to `.permissions.json` in Flint's folder. Permission events are logged to `sessions/security.log`.
+A tool's default comes from a built-in table and is then adjusted by the care level (see `/careful`). A tool not in the table, such as one from an MCP server or a plugin, defaults to confirm. Per-tool settings and "always" answers are saved to `.permissions.json` in Flint's folder. For an MCP tool the prompt also offers `[s]`, which allows every tool of that server at once (saved as `mcp_server:<name>`; a rule for a single tool still wins). `/reset-permissions` clears all of these, and `/allow-all` or `/deny-all` with them. Permission events are logged to `sessions/security.log`.
 
 ### Plugins
 
@@ -243,6 +244,7 @@ Tool results of the form `{ _table: true, columns, rows }` become paginated data
 | `/project [show \| set <name> \| clear]` | Show or set the project scope for memory |
 | `/agents` | List running agent instances |
 | `/mcp` | MCP server status |
+| `/mcp-secret` | Tokens for MCP server headers, kept encrypted: list, `/mcp-secret <NAME>`, `/mcp-secret <NAME> delete` |
 | `/paste [text]` | Send the clipboard (picture or text) to the model at once |
 | `/rewind` | Undo the last file change |
 | `/rewind N` | Undo the last N changes |
@@ -404,7 +406,23 @@ Format: `name|transport|url-or-command`, comma-separated.
 | `sse` | Server-Sent Events (legacy) |
 | `stdio` | A local command started as a subprocess |
 
-In stdio mode Flint also reads `.mcp.json` from the working folder (or the file `--mcp-config` names).
+A server that needs a header, such as a token in `Authorization`, goes into `~/.flint/mcp.json` (under `FLINT_DATA_DIR` if you set it), in the common `mcpServers` format:
+
+```json
+{
+  "mcpServers": {
+    "analytics": {
+      "type": "http",
+      "url": "https://example.com/mcp",
+      "headers": { "Authorization": "Bearer ${ANALYTICS_TOKEN}" }
+    }
+  }
+}
+```
+
+`${NAME}` in a header is a secret kept outside the file. Store it with `/mcp-secret NAME`: the value is typed into a masked box, never shown again, and kept in Flint's encrypted key store beside the provider keys (`/mcp-secret` lists the names, `/mcp-secret NAME delete` removes one). A name that is not in the key store is taken from the environment (`.env` included). If it is in neither, that server is not connected and its status says which name is missing; the header is never sent empty. Servers from this file are connected together with those from `MCP_SERVERS`; one named in both is taken from the file. `/mcp` does not show header values.
+
+In stdio mode Flint reads `.mcp.json` from the working folder (or the file `--mcp-config` names) instead of `~/.flint/mcp.json`; `${NAME}` works there too.
 
 MCP tools are named `mcp_<server>_<tool>` and registered beside the built-in tools. A dropped server is reconnected automatically every 60 s. With many MCP tools, a set number is offered whole (30 at the normal spend level) and the rest through `tool_search`. `/mcp` shows status; the agent can call `list_mcp_servers` and `reconnect_mcp`.
 

@@ -70,6 +70,7 @@ import { initCommands, tryHandleCommand, isSlashCommand } from "./commands/regis
 import { setSupervisorEnabled } from "./agent/supervisor.js";
 import { runAutoMode } from "./agent/auto.js";
 import { initPermissions, bulkSetPermission } from "./tools/permissions.js";
+import { carriedBulkPermission } from "./restart.js";
 import { initSecurity } from "./security/index.js";
 import { fetchModelInfo } from "./api/client.js";
 import { startServer } from "./api/server.js";
@@ -152,6 +153,20 @@ if (cli.action === "stdio") {
     process.stderr.write(`[flint] ${err.message}
 `);
     process.exit(2);
+  }
+}
+
+// -- Console and headless: the operator's own MCP file, which is where a
+// server that needs a header is configured (mcp-client.js) --
+let mcpConfigProblem = null;
+if (cli.action !== "stdio") {
+  try {
+    const { withUserMcpServers } = await import("./mcp-client.js");
+    const merged = withUserMcpServers(config.mcpServers);
+    if (merged) config.mcpServers = merged;
+  } catch (err) {
+    // Said once the console is up; the servers of MCP_SERVERS still connect.
+    mcpConfigProblem = err.message;
   }
 }
 
@@ -255,10 +270,18 @@ const LAUNCHER_RELEASE_WAIT_MS = 500;
 // Sent only when there is a channel: run directly (`node src/index.js`,
 // tests) there is no parent IPC and process.send is undefined, which is a
 // normal way to start Flint and must not throw.
+let carriedBulk = null;
 if (process.send) {
   await new Promise((resolve) => {
     const done = () => { clearTimeout(timer); process.off("message", onMessage); resolve(); };
-    const onMessage = (msg) => { if (msg && msg.type === "flint:released") done(); };
+    const onMessage = (msg) => {
+      if (!msg || msg.type !== "flint:released") return;
+      // A restart of the same session brings /allow-all or /deny-all back
+      // (restart.js). Set before the first turn can run; said once the UI is up.
+      carriedBulk = carriedBulkPermission(msg);
+      if (carriedBulk) bulkSetPermission(carriedBulk);
+      done();
+    };
     const timer = setTimeout(done, LAUNCHER_RELEASE_WAIT_MS);
     process.on("message", onMessage);
     process.send({ type: "flint:ready" });
@@ -273,6 +296,16 @@ const inkInstance = cli.action !== "headless" ? render(h(App, { store, onSubmit:
 if (inkInstance) {
   setInkActive(true); // suppress stderr writes that corrupt Ink layout
   store.setState({ _inkClear: () => inkInstance.clear() });
+}
+if (mcpConfigProblem) {
+  if (inkInstance) printWarning(mcpConfigProblem);
+  else process.stderr.write(`[flint] ${mcpConfigProblem}
+`);
+}
+if (carriedBulk) {
+  printSystem(carriedBulk === "allow"
+    ? "All tools -> allow, kept from before the restart (/reset-permissions turns it off)"
+    : "All tools -> deny, kept from before the restart (/reset-permissions turns it off)");
 }
 
 // -- Graceful shutdown --
@@ -481,6 +514,9 @@ async function handleInput(input, opts = {}) {
     } else if (lower === "a" || lower === "always") {
       printConfirmResult("always", pending.toolName, pending.argsText);
       pending.resolve("always");
+    } else if (lower === "s" && pending.server) {
+      printConfirmResult("server", pending.toolName, pending.argsText, pending.server);
+      pending.resolve("server");
     } else {
       printConfirmResult("deny", pending.toolName, pending.argsText);
       pending.resolve("no");

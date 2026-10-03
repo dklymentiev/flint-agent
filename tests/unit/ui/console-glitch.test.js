@@ -91,7 +91,10 @@ describe("7.1 the start banner prints once", () => {
     expect(ask).toBeGreaterThan(-1);
     expect(wait).toBeGreaterThan(-1);
     expect(clear).toBeGreaterThan(Math.max(ask, wait));
-    expect(launcherSrc).toMatch(/releaseTerminal\(\);\s*\n\s*try \{ child\.send\(\{ type: "flint:released" \}\)/);
+    // The answer may carry the /allow-all level of a restart (restart.js), so
+    // the pattern allows the two lines that pick it up. What it pins is the
+    // order: the spinner is stopped first, the child is answered after.
+    expect(launcherSrc).toMatch(/releaseTerminal\(\);\s*\n(?:[^\n]*carriedBulkPermission[^\n]*\n){0,2}\s*try \{ child\.send\(\{ type: "flint:released"/);
   });
 
   it("keeps the standard streams inherited, so Ink keeps the TTY", () => {

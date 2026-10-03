@@ -12,12 +12,15 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { createLogger } from "./logging/logger.js";
 import { resolveContent } from "./agent/content-resolver.js";
+import { noteMcpTool } from "./tools/mcp-tool-servers.js";
 const log = createLogger("mcp-client");
 
 // Abort signal for MCP calls — set by agent loop, used by handlers
 let _abortSignal = null;
 export function setMcpAbortSignal(signal) { _abortSignal = signal; }
-import { readFileSync } from "node:fs";
+import { readFileSync, existsSync } from "node:fs";
+import { homedir } from "node:os";
+import path from "node:path";
 import { fileURLToPath } from "node:url";
 const _flintVersion = (() => { try { return JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf-8")).version; } catch { return "?"; } })();
 import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
@@ -78,12 +81,68 @@ export function mcpJsonServers(json) {
   }).filter((s) => s.name && (s.url || s.command));
 }
 
+// The operator's own MCP file, read in the console and in headless runs
+// (owner, 2026-10-03). MCP_SERVERS is name|transport|url and has nowhere to
+// put a header, so a server that wants a token in `Authorization` could be
+// configured only in stdio mode, where a .mcp.json is read; in the console it
+// took a local bridge process whose only job was to add the header. Same
+// format as .mcp.json, kept in the data folder beside provider.json.
+
+/** <data folder>/mcp.json */
+export function userMcpConfigPath(env = process.env) {
+  return path.join(env.FLINT_DATA_DIR || path.join(homedir(), ".flint"), "mcp.json");
+}
+
+/**
+ * The servers of MCP_SERVERS together with those of the user's MCP file, or
+ * null when there is no file (the caller then keeps what it had). A server
+ * named in both is taken from the file. A file that cannot be read throws
+ * with its path in the message: a broken file must be said, not skipped.
+ */
+export function withUserMcpServers(envServers, { file = userMcpConfigPath() } = {}) {
+  if (!existsSync(file)) return null;
+  let fromFile;
+  try {
+    fromFile = mcpJsonServers(JSON.parse(readFileSync(file, "utf-8")));
+  } catch (err) {
+    throw new Error(`MCP config ${file} was not loaded: ${err.message}`);
+  }
+  const named = new Set(fromFile.map((s) => s.name));
+  return [...parseServerConfig(envServers).filter((s) => !named.has(s.name)), ...fromFile];
+}
+
+/**
+ * Header values with ${NAME} filled in, so a token stays out of the file.
+ * A name is looked up in Flint's encrypted key store first (/mcp-secret NAME
+ * puts it there) and in the environment second. One that is in neither, or
+ * empty, is an error naming it and the server: sent as written, or sent
+ * empty, the header would reach the server as a wrong token and come back as
+ * a puzzling 401.
+ */
+export async function expandHeaders(headers, serverName, env = process.env) {
+  const { getMcpSecret } = await import("./providers/keys.js");
+  const out = {};
+  for (const [key, value] of Object.entries(headers)) {
+    let text = String(value);
+    const names = [...new Set([...text.matchAll(/\$\{([A-Za-z_][A-Za-z0-9_]*)\}/g)].map((m) => m[1]))];
+    for (const name of names) {
+      const secret = (await getMcpSecret(name)) || env[name];
+      if (!secret) {
+        throw new Error(`header "${key}" of MCP server "${serverName}" names \${${name}}, which is not in the key store (/mcp-secret ${name}) and not set in the environment`);
+      }
+      text = text.split("${" + name + "}").join(secret);
+    }
+    out[key] = text;
+  }
+  return out;
+}
+
 /**
  * Connect to a single MCP server and return its tools + handlers.
  */
 async function connectServer(serverConfig) {
   const { name, transport: transportType, url } = serverConfig;
-  const requestInit = serverConfig.headers ? { headers: serverConfig.headers } : undefined;
+  const requestInit = serverConfig.headers ? { headers: await expandHeaders(serverConfig.headers, name) } : undefined;
 
   let transport;
   if (transportType === "stdio") {
@@ -134,6 +193,7 @@ async function connectServer(serverConfig) {
 
   for (const tool of mcpTools) {
     const toolName = `mcp_${name}_${tool.name}`;
+    noteMcpTool(toolName, name);
 
     // OpenAI function calling format — prefixed to avoid collisions
     tools.push({

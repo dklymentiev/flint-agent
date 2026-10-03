@@ -3,6 +3,7 @@
 import { existsSync, readFileSync, writeFileSync, appendFileSync, mkdirSync } from "node:fs";
 import path from "node:path";
 import { executeTool, getDefinitions } from "./registry.js";
+import { mcpServerOf } from "./mcp-tool-servers.js";
 
 // Tool-name auto-repair at the entry point so permission checks use the corrected name.
 // Levenshtein distance <= 2, unambiguous closest match.
@@ -410,9 +411,23 @@ export function initPermissions({ confirm, timeout }) {
   if (timeout != null) confirmTimeoutMs = timeout;
 }
 
+/**
+ * The key a whole-server rule is stored under in .permissions.json. The colon
+ * keeps it from ever being a tool's name.
+ */
+export function mcpServerKey(server) {
+  return `mcp_server:${server}`;
+}
+
 export function getPermission(name) {
   if (_globalPermission) return _globalPermission;
   if (sessionOverrides[name]) return sessionOverrides[name];
+  // One answer for a whole MCP server (owner, 2026-10-03): "always" on one
+  // tool left every other tool of the same server asking, about fifty
+  // prompts for five servers. A rule for the tool itself is checked first,
+  // so /deny or /confirm on one tool still holds.
+  const server = mcpServerOf(name);
+  if (server && sessionOverrides[mcpServerKey(server)]) return sessionOverrides[mcpServerKey(server)];
   // The chosen care level relaxes a default of "confirm" (see policies.js).
   const level = getOnboardingAnswer() || DEFAULT_ONBOARDING_LEVEL;
   return toolPermissionAtLevel(level, name, DEFAULT_PERMISSIONS[name] || "confirm");
@@ -453,6 +468,9 @@ export function resetSessionOverrides() {
   for (const key of Object.keys(approvedPaths)) {
     delete approvedPaths[key];
   }
+  // /allow-all and /deny-all too. They used to end with the process; since a
+  // restart of the same session keeps them (restart.js), this is the way out.
+  _globalPermission = null;
   saveOverridesToDisk();
 }
 
@@ -486,6 +504,15 @@ export function bulkSetPermission(level) {
   // SEC-02: YOLO mode is session-only — never persist to disk.
   // A prompt-injected agent must not be able to self-escalate permanently.
   _globalPermission = level;
+}
+
+/**
+ * The blanket level set by /allow-all or /deny-all, or null. Read by the
+ * restart (restart.js), which hands it to the launcher so that a restart of
+ * the same session does not silently drop it.
+ */
+export function getBulkPermission() {
+  return _globalPermission || null;
 }
 
 const PLUGIN_LOAD_TOOLS = new Set(["install_plugin", "reload_plugins"]);
@@ -617,13 +644,21 @@ export async function executeToolWithPermissions(name, args) {
       };
     }
 
+    // "All of this server" is offered only for the plain question about an MCP
+    // tool. A prompt a hook or a guard forced is about one file or one
+    // command, and its answer must stay that narrow.
+    const serverChoice = !forceConfirm && !confirmKey ? mcpServerOf(name) : null;
+
     // Wrap confirm with timeout
     const answer = await Promise.race([
-      confirmFn(name, args, { reason: confirmReason, scope, key: confirmKey }),
+      confirmFn(name, args, { reason: confirmReason, scope, key: confirmKey, ...(serverChoice ? { server: serverChoice } : {}) }),
       new Promise((resolve) => setTimeout(() => resolve("timeout"), confirmTimeoutMs)),
     ]);
 
-    if (answer === "always") {
+    if (answer === "server" && serverChoice) {
+      sessionOverrides[mcpServerKey(serverChoice)] = "allow";
+      saveOverridesToDisk();
+    } else if (answer === "always") {
       if (confirmKey) {
         // Narrow on purpose: "always read this .env" is a decision a person
         // can mean; "always read every secret file" is not.

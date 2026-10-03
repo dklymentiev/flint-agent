@@ -119,7 +119,36 @@ export function hasKey(providerId) {
 
 export function listConfiguredProviders() {
   const keys = loadKeysFile();
-  return Object.keys(keys);
+  return Object.keys(keys).filter((id) => !id.startsWith(MCP_SECRET_PREFIX));
+}
+
+// Secrets for MCP servers (a token for an `Authorization` header) live in the
+// same encrypted file as the provider keys, under their own prefix so that
+// they are never listed or looked up as a provider. Owner, 2026-10-03: a
+// token in .env is a secret in plain text beside the code.
+const MCP_SECRET_PREFIX = "mcp:";
+
+/** The names a header may refer to as ${NAME}. */
+export const MCP_SECRET_NAME_RE = /^[A-Za-z_][A-Za-z0-9_]*$/;
+
+export async function getMcpSecret(name) {
+  return getKey(MCP_SECRET_PREFIX + name);
+}
+
+export async function setMcpSecret(name, plaintext) {
+  if (!MCP_SECRET_NAME_RE.test(name)) throw new Error(`"${name}" is not a name a header can refer to (letters, digits, _)`);
+  await setKey(MCP_SECRET_PREFIX + name, plaintext);
+}
+
+export async function deleteMcpSecret(name) {
+  await deleteKey(MCP_SECRET_PREFIX + name);
+}
+
+/** Names only, never values. */
+export function listMcpSecrets() {
+  return Object.keys(loadKeysFile())
+    .filter((id) => id.startsWith(MCP_SECRET_PREFIX))
+    .map((id) => id.slice(MCP_SECRET_PREFIX.length));
 }
 
 /** Import a key from an env var into encrypted storage. Used during startup migration. */

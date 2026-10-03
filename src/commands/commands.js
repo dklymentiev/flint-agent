@@ -51,6 +51,7 @@ export function registerCommands(store) {
       log(chalk.white("  /queue") + chalk.gray("    -- list queued messages"));
       log(chalk.white("  /later <q>") + chalk.gray(" -- queue a question for later"));
       log(chalk.white("  /paired") + chalk.gray("   -- programs paired with the API (/paired revoke <name>)"));
+      log(chalk.white("  /mcp-secret") + chalk.gray(" -- tokens for MCP servers, kept encrypted (/mcp-secret <NAME>)"));
       log(chalk.white("  /careful") + chalk.gray("  -- how often Flint asks: safe, normal, permissive"));
       log(chalk.white("  /ps") + chalk.gray("       -- background processes"));
       log(chalk.white("  /logs <id>") + chalk.gray(" -- last output of a background process"));
@@ -707,6 +708,52 @@ export function registerCommands(store) {
       }
     },
 
+    // A secret for an MCP server's header (mcp-client.js expandHeaders), kept in
+    // the encrypted key store. Read through the app's secret box for the same
+    // reason /key is: nothing typed here may reach the model or the session log.
+    async "/mcp-secret"(arg) {
+      const { listMcpSecrets, setMcpSecret, deleteMcpSecret, MCP_SECRET_NAME_RE } = await import("../providers/keys.js");
+      const parts = (arg || "").trim().split(/\s+/).filter(Boolean);
+      const name = parts[0];
+      const action = parts[1]?.toLowerCase();
+
+      if (!name) {
+        const names = listMcpSecrets();
+        log("");
+        log(chalk.cyan("  MCP secrets:"));
+        if (!names.length) log(chalk.gray("  None stored."));
+        for (const n of names) log(`  ${chalk.green("+")} ${chalk.white(n)}`);
+        log(chalk.gray("\n  /mcp-secret <NAME>        -- store a value; a header refers to it as ${NAME}"));
+        log(chalk.gray("  /mcp-secret <NAME> delete -- remove it"));
+        log("");
+        return;
+      }
+
+      if (!MCP_SECRET_NAME_RE.test(name)) {
+        log(chalk.red(`  "${name}" is not a name a header can refer to. Use letters, digits and _.`));
+        return;
+      }
+
+      if (action === "delete") {
+        await deleteMcpSecret(name);
+        log(chalk.green(`  ${name} removed.`));
+        return;
+      }
+
+      log(chalk.cyan(`  Enter the value for ${name}:`));
+      log(chalk.gray("  (paste it and press Enter)"));
+      const value = await new Promise((resolve) => {
+        store.setState({ secretPrompt: { label: `MCP secret ${name}`, resolve } });
+      });
+      const trimmed = String(value || "").trim();
+      if (!trimmed) {
+        log(chalk.gray("  Cancelled."));
+        return;
+      }
+      await setMcpSecret(name, trimmed);
+      log(chalk.green(`  ${name} saved (encrypted). /restart connects the servers that use it.`));
+    },
+
     // The onboarding menu promised "you can change it later with /careful",
     // and there was no such command (owner, 2026-10-01).
     async "/careful"(arg) {
@@ -1029,7 +1076,7 @@ export function registerCommands(store) {
         const status = s.connected ? chalk.green("[+]") : chalk.red("[ ]");
         log(`  ${status} ${chalk.white(s.name)}  ${chalk.gray(s.url)}`);
       }
-      log(chalk.gray("\n  Reconnect/disconnect via the agent or MCP_SERVERS env var."));
+      log(chalk.gray("\n  Servers come from MCP_SERVERS and ~/.flint/mcp.json; /mcp-secret stores a token for a header."));
       log("");
     },
 

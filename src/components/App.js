@@ -94,6 +94,7 @@ export function App({ store, onSubmit, onAbort, onQuit, onClipboard, onRecallQue
     processes: s.processes,
     pendingConfirmation: s.pendingConfirmation ? s.pendingConfirmation.toolName : null,
     pendingConfirmationArgs: s.pendingConfirmation ? s.pendingConfirmation.argsText || null : null,
+    pendingConfirmationServer: s.pendingConfirmation ? s.pendingConfirmation.server || null : null,
     pendingPairing: s.pendingPairing || null,
     autoMode: s.autoMode || null,
     overlay: s.overlay || null,
@@ -325,11 +326,13 @@ export function App({ store, onSubmit, onAbort, onQuit, onClipboard, onRecallQue
       return;
     }
 
-    // A pending approval is answered with one key: y, n or a. Esc means no.
+    // A pending approval is answered with one key: y, n or a, and s when the
+    // prompt offers a whole MCP server. Esc means no.
     // The text input is not focused meanwhile, so the key is not typed.
     if (store.getState().pendingConfirmation) {
       const k = (ch || "").toLowerCase();
       if (k === "y" || k === "n" || k === "a") onSubmit?.(k);
+      else if (k === "s" && store.getState().pendingConfirmation.server) onSubmit?.(k);
       else if (key.escape) onSubmit?.("n");
       return;
     }

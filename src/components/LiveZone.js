@@ -149,7 +149,10 @@ export function confirmRows(state, now = Date.now(), columns = process.stdout.co
     return [`  [!] Pairing from ${who}: PIN ${p.pin} (${left}s). Type "C" to cancel.`];
   }
   if (state.pendingConfirmation) {
-    const head = `  ? ${state.pendingConfirmation}    [y] yes  [n] no  [a] always`;
+    // [s] only for an MCP tool: one answer for every tool of that server
+    // (permissions.js getPermission).
+    const all = state.pendingConfirmationServer ? `  [s] all of ${state.pendingConfirmationServer}` : "";
+    const head = `  ? ${state.pendingConfirmation}    [y] yes  [n] no  [a] always${all}`;
     const lines = approvalArgLines(state.pendingConfirmationArgs, columns);
     if (approvalFitsLive(lines.length)) return [head, ...lines];
     return [head, `    full command printed above ↑ (${lines.length} lines)`];

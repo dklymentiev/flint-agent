@@ -1,6 +1,6 @@
 # Flint Agent -- Technical Reference
 
-**Version:** 1.14.3
+**Version:** 1.14.4
 **Checked against the code:** 2026-10-03
 **Source:** The main exported functions, tools, endpoints, commands and config options in `src/`
 
@@ -876,11 +876,11 @@ Main wrapper. Pipeline:
 5. Execute tool
 6. Run afterHooks (can transform result)
 
-Answers: `"yes"`, `"always"` (persists; for a command, remembered per project in `src/tools/command-approvals.js`; for a sensitive path, per file), `"no"`, `"timeout"` (auto-deny).
+Answers: `"yes"`, `"always"` (persists; for a command, remembered per project in `src/tools/command-approvals.js`; for a sensitive path, per file), `"no"`, `"timeout"` (auto-deny), and `"server"`, offered only for an MCP tool whose prompt no hook forced: it stores `mcp_server:<name>` = allow, which `getPermission` checks after the tool's own rule. The server of a tool comes from `src/tools/mcp-tool-servers.js`, filled by the MCP client at registration, because `mcp_<server>_<tool>` cannot be split back.
 
 #### `bulkSetPermission(level)` -> `void`
 
-Session-only global override. Used by YOLO mode and API auto-approve. Never persisted to disk.
+Session-only global override. Used by YOLO mode and API auto-approve. Never persisted to disk. A restart of the same session keeps it: `restartKeepingSession` puts `getBulkPermission()` into the `flint:restart` IPC message, the launcher holds it and gives it to the next process once in `flint:released`. `resetSessionOverrides()` clears it.
 
 ---
 
@@ -1412,6 +1412,8 @@ Transports: `sse` (SSE), `http` (Streamable HTTP), `stdio` (subprocess)
 Example: `docs|http|http://localhost:5000/mcp`
 
 In stdio mode, servers from `--mcp-config <path>` or the folder's `.mcp.json` (`{"mcpServers": {...}}` with `type`/`url`/`headers` or `command`/`args`/`env`) are added to `MCP_SERVERS` (`parseServerConfig()`, `mcpJsonServers()`).
+
+In the console and in headless runs, `withUserMcpServers(envServers)` adds the servers of `userMcpConfigPath()` (`<data folder>/mcp.json`, same format); a server named in both is taken from the file, no file returns null, a file that cannot be read throws with its path. `expandHeaders(headers, serverName)` (async) fills `${NAME}` in header values at connect time, from the encrypted key store first (`getMcpSecret` in `src/providers/keys.js`, entries under the `mcp:` prefix, set by `/mcp-secret`) and from the environment second, and throws when the name is in neither or empty, so that one server fails with a message and the rest connect. `listConfiguredProviders()` leaves the `mcp:` entries out.
 
 #### `connectMcpServers(serversEnv)` -> `Promise<{ tools, handlers, results }>`
 
