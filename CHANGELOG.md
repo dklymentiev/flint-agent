@@ -7,6 +7,28 @@ All notable changes to Flint are written here. The format follows
 Each version is a `## [x.y.z] - YYYY-MM-DD` heading: `/update` reads these
 headings to show what changed between your version and the newest one.
 
+## [1.14.2] - 2026-10-02
+
+### Fixed
+- Child agents opened in their own window (`spawn_agent` with `visible`)
+  stay reachable. The process that opens the window exits at once, and Flint
+  took that for the agent's exit: it reported "exited", forgot the agent,
+  and `ask_agent` answered "has stopped", so every question started a new
+  agent. Whether such an agent is alive is now decided by its heartbeat, and
+  Esc stops the agent itself rather than the long-gone window launcher.
+- The API key is no longer written in plain text to a temporary `.bat` file
+  when a visible child agent starts on Windows; it is passed in the
+  environment.
+- A piece of the "loading..." splash no longer stays on the top line of the
+  console now and then: Flint waits until the splash has stopped before it
+  clears the screen.
+
+### Changed
+- A child agent lives as long as its parent instead of stopping after 60
+  seconds idle, so you can talk to it across several questions. It still
+  stops about a minute after its parent is gone. `AGENT_CHILD_IDLE_TIMEOUT`
+  turns an idle limit back on.
+
 ## [1.14.1] - 2026-10-02
 
 ### Fixed

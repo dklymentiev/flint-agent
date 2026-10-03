@@ -43,7 +43,7 @@
 ### 5. Multi-Agent
 - Spawn child agents with different models and profiles (`spawn_agent`)
 - `ask_agent` waits for the child's answer; `wait_tasks` waits for delegated work
-- Each child runs on its own port with its own data folder, and stops itself after an idle timeout
+- Each child runs on its own port with its own data folder, and lives as long as its parent (an idle timeout can be turned on)
 - Child agents can push datasets back to the parent
 
 ### 6. Memory & Knowledge

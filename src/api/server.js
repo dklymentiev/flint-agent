@@ -311,6 +311,10 @@ export function startServer(port, store, processMessage, opts = {}) {
           model: s.model,
           messages: s.messages.length,
           alive: true,
+          // A parent that opened this agent in its own window only knows the
+          // pid of the window launcher, which exits at once; it learns the
+          // real one here so it can stop the agent (tools/agent-tools.js).
+          pid: process.pid,
           // A bench harness cannot sum the per-turn figures and get the truth:
           // a turn it abandoned on a timeout still spent money it never saw.
           // The session total is the only honest number, so serve it, and the

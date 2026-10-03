@@ -12,6 +12,10 @@ let tmpDir;
 
 function migrate(db) {
   db.pragma("foreign_keys = ON");
+  // A scratch database: no fsync per row. With it, inserting a few hundred
+  // rows took over the 10 s test timeout on the Windows CI runners (2026-10-02).
+  db.pragma("synchronous = OFF");
+  db.pragma("journal_mode = MEMORY");
   db.exec(`
     CREATE TABLE IF NOT EXISTS goals (
       id INTEGER PRIMARY KEY AUTOINCREMENT,

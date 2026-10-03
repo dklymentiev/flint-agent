@@ -76,8 +76,9 @@ const _spinner = setInterval(() => {
  * streams stay inherited on purpose — piping them would cost Ink the TTY, and
  * raw-mode key handling with it.
  *
- * So the child says when it has drawn, over an IPC channel that costs nothing
- * and is invisible to the terminal. The interval is kept as a ceiling rather
+ * So the child says when it is about to draw, over an IPC channel that costs
+ * nothing and is invisible to the terminal, and waits for "flint:released"
+ * before it clears the screen. The interval is kept as a ceiling rather
  * than removed: a child that dies without saying anything must not hold the
  * event loop open, and `_released` makes the remaining ticks no-ops.
  */
@@ -100,8 +101,13 @@ function start(extraArgs = []) {
   });
   if (stdioMode) releaseTerminal();
 
+  // On "flint:ready": stop first, answer after. Once the child has the answer
+  // no tick can follow, so it can clear the screen safely (src/index.js).
   child.on("message", (msg) => {
-    if (msg && msg.type === "flint:ready") releaseTerminal();
+    if (msg && msg.type === "flint:ready") {
+      releaseTerminal();
+      try { child.send({ type: "flint:released" }); } catch {}
+    }
     if (msg && msg.type === "flint:restart" && typeof msg.sessionId === "string") resumeSessionId = msg.sessionId;
   });
 

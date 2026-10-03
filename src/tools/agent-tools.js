@@ -20,6 +20,16 @@ const HEARTBEAT_INTERVAL = 15000; // 15s
 const MAX_MISSED_PINGS = 3;
 let _heartbeatTimer = null;
 
+// Keep the pid a child reports in /status: for an agent in its own window it
+// is the only handle on the real process (the launcher's pid is dead).
+async function notePid(agent, res) {
+  if (!agent.visible || agent.agentPid || typeof res.json !== "function") return;
+  try {
+    const data = await res.json();
+    if (Number.isInteger(data?.pid)) agent.agentPid = data.pid;
+  } catch {}
+}
+
 // Start heartbeat monitoring for child agents
 function startChildHeartbeat(store) {
   if (_heartbeatTimer) return;
@@ -31,6 +41,7 @@ function startChildHeartbeat(store) {
           signal: AbortSignal.timeout(3000),
         });
         if (res.ok) {
+          await notePid(agent, res);
           if (agent.missedPings > 0) {
             // Recovered
             const label = agent.profile !== "generic" ? agent.profile : null;
@@ -49,6 +60,12 @@ function startChildHeartbeat(store) {
         printChildEvent(port, `connection lost (${MAX_MISSED_PINGS} missed pings)`, label);
         store.getState().finishProcess(agent.procId, null, "lost");
         activeChildren.delete(agent.procId);
+        // A visible agent has no "close" of its own to clean up after it
+        // (spawn_agent), so the heartbeat does it.
+        if (agent.visible) {
+          if (agent.taskRegId) store.getState().unregisterTask(agent.taskRegId);
+          setTimeout(() => _childAgents.delete(port), config.childCleanupDelay);
+        }
       } else {
         log.debug(`Agent@${port} no response (${agent.missedPings}/${MAX_MISSED_PINGS})`);
         printChildEvent(port, `no response (${agent.missedPings}/${MAX_MISSED_PINGS})`, label);
@@ -179,8 +196,12 @@ export function createAgentHandlers(store) {
       childEnv.AGENT_PAIRING_SECRET = pairingSecret;
       // Parent port for orphan protection heartbeat
       childEnv.AGENT_PARENT_PORT = String(config.port);
-      // Auto-exit after idle period (zombie fix)
-      childEnv.AGENT_IDLE_TIMEOUT = String(config.childIdleTimeout || 60);
+      // Idle exit, off by default (0): a child lives as long as its parent,
+      // and the parent heartbeat in index.js stops it when the parent is
+      // gone, which is what the idle exit was first added for. A 60 s default
+      // stopped children between two questions, so a conversation with one
+      // was impossible (owner, 2026-10-02). AGENT_CHILD_IDLE_TIMEOUT turns it on.
+      childEnv.AGENT_IDLE_TIMEOUT = String(config.childIdleTimeout || 0);
       // Track agent depth for child-policy enforcement
       const currentDepth = parseInt(process.env.AGENT_DEPTH || "0", 10);
       childEnv.AGENT_DEPTH = String(currentDepth + 1);
@@ -201,35 +222,25 @@ export function createAgentHandlers(store) {
 
       let child;
       if (visible && isWin) {
-        // Write a temp .bat launcher, then open it in a new window via Start-Process
-        // This ensures complete process isolation — no shared console with parent
+        // A temp .bat opened in a new window with `start`, so the child has a
+        // console of its own. The environment (API key, pairing secret) goes
+        // to cmd.exe, and `start` hands it to the new window. It used to be
+        // written into the .bat as `set` lines, which left the API key in
+        // plain text in %TEMP% for good, while Flint stores keys encrypted
+        // everywhere else (found 2026-10-02).
         const os = await import("node:os");
         const fs = await import("node:fs");
         const batPath = path.join(os.tmpdir(), `flint-agent-${assignedPort}.bat`);
         const batLines = [
           "@echo off",
           `title Flint@${assignedPort}`,
-          `set "AGENT_PORT=${assignedPort}"`,
-          `set "AGENT_PAIRING_SECRET=${pairingSecret}"`,
-          `set "AGENT_PARENT_PORT=${config.port}"`,
-          `set "AGENT_DEPTH=${childEnv.AGENT_DEPTH}"`,
-          `set "FLINT_PROVIDER=${config.provider}"`,
-          `set "FLINT_DATA_DIR=${childEnv.FLINT_DATA_DIR}"`,
+          `cd /d "${config.projectRoot}"`,
+          cmd,
         ];
-        // Pass the correct API key env var in bat file
-        if (config.apiKey) {
-          if (config.provider === "openrouter") batLines.push(`set "OPENROUTER_API_KEY=${config.apiKey}"`);
-          else if (config.provider === "openai") batLines.push(`set "OPENAI_API_KEY=${config.apiKey}"`);
-          else if (config.provider === "anthropic") batLines.push(`set "ANTHROPIC_API_KEY=${config.apiKey}"`);
-          else batLines.push(`set "OPENROUTER_API_KEY=${config.apiKey}"`);
-        }
-        if (childEnv.AGENT_DENIED_PATHS) batLines.push(`set "AGENT_DENIED_PATHS=${childEnv.AGENT_DENIED_PATHS}"`);
-        if (task_id) batLines.push(`set "AGENT_TASK_ID=${task_id}"`);
-        batLines.push(`cd /d "${config.projectRoot}"`);
-        batLines.push(cmd);
         fs.writeFileSync(batPath, batLines.join("\r\n") + "\r\n");
 
         child = spawn("cmd.exe", ["/c", "start", `"Flint@${assignedPort}"`, batPath], {
+          env: childEnv,
           stdio: "ignore",
           detached: true,
           windowsHide: true,
@@ -297,7 +308,13 @@ export function createAgentHandlers(store) {
         port: assignedPort,
         kill: () => {
           try {
-            if (process.platform === "win32" && child.pid) {
+            // A visible agent's own pid comes from its /status; child.pid is
+            // the window launcher, long gone.
+            const agentPid = _childAgents.get(assignedPort)?.agentPid;
+            if (visible && agentPid) {
+              if (process.platform === "win32") spawn("taskkill", ["/PID", String(agentPid), "/T", "/F"], { stdio: "ignore" });
+              else process.kill(agentPid, "SIGTERM");
+            } else if (process.platform === "win32" && child.pid) {
               spawn("taskkill", ["/PID", String(child.pid), "/T", "/F"], { stdio: "ignore" });
             } else {
               child.kill("SIGTERM");
@@ -305,6 +322,7 @@ export function createAgentHandlers(store) {
           } catch {}
         },
       });
+      _childAgents.get(assignedPort).taskRegId = taskRegId;
 
       // Start heartbeat monitoring
       startChildHeartbeat(store);
@@ -325,6 +343,14 @@ export function createAgentHandlers(store) {
       }
 
       child.on("close", (code) => {
+        // A visible agent runs in a window that `start` (Windows), tmux,
+        // screen or a terminal emulator opened; the process spawned here only
+        // opens it and exits at once with 0. Taking that for the agent's exit
+        // marked a live agent stopped and forgot it 5 s later, so ask_agent
+        // answered "has stopped" and the model spawned a new agent for every
+        // question (owner, 2026-10-02). The heartbeat decides when a visible
+        // agent is gone; only a launcher that failed counts here.
+        if (visible && code === 0) return;
         activeChildren.delete(procId);
         store.getState().unregisterTask(taskRegId);
         store.getState().finishProcess(procId, code);
@@ -354,7 +380,10 @@ export function createAgentHandlers(store) {
             });
             if (res.ok) {
               const agent = _childAgents.get(assignedPort);
-              if (agent) agent.status = "running";
+              if (agent) {
+                agent.status = "running";
+                await notePid(agent, res);
+              }
               // Send the task (authenticated with pairing secret)
               const taskRes = await fetch(apiUrl(assignedPort, "/message"), {
                 method: "POST",
@@ -385,7 +414,7 @@ export function createAgentHandlers(store) {
     async ask_agent({ port, message }) {
       const agent = _childAgents.get(port);
       if (!agent) return `No agent on port ${port}. Use list_agents() to see available agents.`;
-      if (agent.status === "stopped") return `Agent@${port} has stopped. Spawn a new one.`;
+      if (agent.status === "stopped" || agent.status === "lost") return `Agent@${port} has stopped. Spawn a new one.`;
 
       // Wait for agent to be ready if it's still starting
       if (agent.status === "starting") {
@@ -393,7 +422,7 @@ export function createAgentHandlers(store) {
           await new Promise((r) => setTimeout(r, 1000));
           try {
             const check = await fetch(apiUrl(port, "/status"), { signal: AbortSignal.timeout(2000) });
-            if (check.ok) { agent.status = "running"; break; }
+            if (check.ok) { agent.status = "running"; await notePid(agent, check); break; }
           } catch {}
         }
         if (agent.status !== "running") return `Agent@${port} failed to start within 30s.`;

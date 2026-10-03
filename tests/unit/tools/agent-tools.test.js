@@ -262,6 +262,64 @@ describe("ask_agent", () => {
   }, 15000);
 });
 
+// ── visible agents ──
+//
+// Owner, 2026-10-02: a child opened in its own window was reported "exited
+// (code 0)" right after "Spawned", ask_agent answered "has stopped", and the
+// model spawned a new agent for every question. The process spawned for a
+// visible agent only opens the window and exits at once; the agent lives on.
+
+describe("visible agents", () => {
+  it("stay alive when the window launcher exits", async () => {
+    await handlers.spawn_agent({ task: "visible stays", port: 5110, visible: true });
+    _fakeChildren[_fakeChildren.length - 1].emit("close", 0);
+    await new Promise((r) => setTimeout(r, 150)); // longer than childCleanupDelay
+
+    const list = await handlers.list_agents();
+    expect(list).toContain("5110");
+    expect(list).not.toMatch(/5110\s*\|[^\n]*stopped/);
+
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn().mockImplementation(async (url) => {
+      if (String(url).includes("/message")) return { ok: true, json: async () => ({ response: "still here" }) };
+      return { ok: true, json: async () => ({ alive: true, pid: 4242 }) };
+    });
+    try {
+      const result = await handlers.ask_agent({ port: 5110, message: "are you there?" });
+      expect(result).toContain("still here");
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  }, 40000);
+
+  it("is stopped when its launcher fails", async () => {
+    await handlers.spawn_agent({ task: "visible fails", port: 5120, visible: true });
+    _fakeChildren[_fakeChildren.length - 1].emit("close", 1);
+    await new Promise((r) => setTimeout(r, 10));
+    const result = await handlers.ask_agent({ port: 5120, message: "hello" });
+    expect(result).toContain("stopped");
+  });
+
+  it("on Windows keeps the API key out of the .bat and passes it in the environment", async () => {
+    const realPlatform = Object.getOwnPropertyDescriptor(process, "platform");
+    Object.defineProperty(process, "platform", { value: "win32" });
+    try {
+      await handlers.spawn_agent({ task: "no key on disk", port: 5130, visible: true });
+    } finally {
+      Object.defineProperty(process, "platform", realPlatform);
+    }
+    const [cmd, args, opts] = mockSpawn.mock.calls[mockSpawn.mock.calls.length - 1];
+    expect(cmd).toBe("cmd.exe");
+    expect(opts.env.OPENROUTER_API_KEY).toBe("test-key-12345");
+    expect(opts.env.AGENT_PAIRING_SECRET).toMatch(/^[0-9a-f]{64}$/);
+    const fs = await import("node:fs");
+    const bat = fs.readFileSync(args[args.length - 1], "utf8");
+    expect(bat).not.toContain("test-key-12345");
+    expect(bat).not.toContain(opts.env.AGENT_PAIRING_SECRET);
+    expect(bat).toContain("--port 5130");
+  });
+});
+
 // ── list_agents ──
 
 describe("list_agents", () => {

@@ -79,6 +79,21 @@ describe("7.1 the start banner prints once", () => {
     expect(indexSrc).toMatch(/process\.send\(\{\s*type:\s*["']flint:ready["']/);
   });
 
+  it("stops the spinner before the child clears the screen, not after it draws", () => {
+    // Owner, 2026-10-02: "loading..." sometimes sat on the top line of the
+    // console with Ink's border drawn after it. flint:ready went out after the
+    // first render, so a tick between the clear and the message wrote into
+    // the cleared screen. The child now asks first, waits for the launcher's
+    // answer, then clears; the launcher stops the interval before answering.
+    const ask = indexSrc.indexOf('process.send({ type: "flint:ready" })');
+    const wait = indexSrc.indexOf('"flint:released"', indexSrc.indexOf("await new Promise"));
+    const clear = indexSrc.indexOf('process.stdout.write("\\x1b[2J');
+    expect(ask).toBeGreaterThan(-1);
+    expect(wait).toBeGreaterThan(-1);
+    expect(clear).toBeGreaterThan(Math.max(ask, wait));
+    expect(launcherSrc).toMatch(/releaseTerminal\(\);\s*\n\s*try \{ child\.send\(\{ type: "flint:released" \}\)/);
+  });
+
   it("keeps the standard streams inherited, so Ink keeps the TTY", () => {
     // Piping stdout/stderr would cost Ink raw-mode key handling. The fix adds a
     // fourth channel; it must not rearrange the first three.

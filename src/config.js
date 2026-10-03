@@ -195,7 +195,7 @@ export const config = {
     .filter(Boolean)
     .map((p) => path.resolve(p)),
   maxChildAgents: parseInt(process.env.AGENT_MAX_CHILDREN || "5", 10),
-  childIdleTimeout: parseInt(process.env.AGENT_CHILD_IDLE_TIMEOUT || "60", 10), // seconds
+  childIdleTimeout: parseInt(process.env.AGENT_CHILD_IDLE_TIMEOUT || "0", 10), // seconds, 0 = live as long as the parent
   childCleanupDelay: parseInt(process.env.AGENT_CHILD_CLEANUP_DELAY || "30000", 10), // ms before removing stopped agent from registry
   shell: process.env.AGENT_SHELL || (() => {
     if (process.platform !== "win32") return "/bin/bash";

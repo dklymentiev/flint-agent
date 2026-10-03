@@ -18,6 +18,19 @@ import { existsSync, mkdirSync } from "node:fs";
 // change cwd (isolated-cwd.js) which would make path.resolve() diverge.
 const EXPECTED_HOME = process.env.HOME;
 
+// One data folder per vitest worker. The config makes one FLINT_DATA_DIR for
+// the whole run, and the workers run test files in parallel, so the memory
+// database (sqlite-store, skills, facts, patterns) was one file open in
+// several processes at once: "SqliteError: disk I/O error" on the Windows CI
+// runners, and rows one file inserted wiped by another file's cleanup
+// (sqlite-store reflections failing in a full run, passing alone; 2026-10-02).
+// A worker runs one file at a time, so its own folder is enough.
+if (process.env.VITEST === "true" && process.env.FLINT_DATA_DIR && process.env.VITEST_POOL_ID) {
+  process.env.FLINT_TEST_DATA_BASE ||= process.env.FLINT_DATA_DIR;
+  process.env.FLINT_DATA_DIR = path.join(process.env.FLINT_TEST_DATA_BASE, `worker-${process.env.VITEST_POOL_ID}`);
+  mkdirSync(process.env.FLINT_DATA_DIR, { recursive: true });
+}
+
 const home = os.homedir();
 
 if (process.env.VITEST === "true" && EXPECTED_HOME) {

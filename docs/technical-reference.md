@@ -1,6 +1,6 @@
 # Flint Agent -- Technical Reference
 
-**Version:** 1.14.1
+**Version:** 1.14.2
 **Checked against the code:** 2026-10-02
 **Source:** The main exported functions, tools, endpoints, commands and config options in `src/`
 
@@ -106,7 +106,7 @@ Central configuration object. Reads from CLI args, env vars, persisted provider 
 | `workdirBase` | string | `""` | `AGENT_WORKDIR` | Working directory for file tools |
 | `allowedPaths` | string[] | `[]` | `AGENT_ALLOWED_PATHS` | Filesystem sandbox (comma-separated) |
 | `maxChildAgents` | number | `5` | `AGENT_MAX_CHILDREN` | Max concurrent child agents |
-| `childIdleTimeout` | number | `60` | `AGENT_CHILD_IDLE_TIMEOUT` | Seconds before idle child exits |
+| `childIdleTimeout` | number | `0` | `AGENT_CHILD_IDLE_TIMEOUT` | Seconds before an idle child exits; 0 = it lives as long as its parent |
 | `childCleanupDelay` | number | `30000` | `AGENT_CHILD_CLEANUP_DELAY` | Ms before removing stopped agent from registry |
 | `shell` | string | auto-detect | `AGENT_SHELL` | Shell for run_command (Git Bash on Windows) |
 | `maxBatchFiles` | number | `20` | `AGENT_MAX_BATCH_FILES` | Max files per write_file batch |
@@ -764,7 +764,7 @@ Multi-agent tools for spawning and communicating with child agents.
 - Task-driven mode with `task_id` (child claims and updates SQLite task)
 - Pairing secret for parent-child auth
 - Own data folder per child (`<data dir>/children/<port>`), so no two processes share a queue
-- Idle timeout (`AGENT_CHILD_IDLE_TIMEOUT`, default 60 s) that does not fire while a turn or queued work is running (`src/child-idle.js`)
+- Idle timeout (`AGENT_CHILD_IDLE_TIMEOUT`, off by default: a child lives as long as its parent) that does not fire while a turn or queued work is running (`src/child-idle.js`)
 
 ### `src/tools/tasks.js`
 

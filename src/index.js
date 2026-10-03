@@ -235,6 +235,36 @@ function handleAbort() {
 // Populate header lines BEFORE Ink render so first frame is complete
 printHeader();
 
+// Longest wait for the launcher to confirm its spinner stopped. It answers in
+// a few ms; the cap only matters for a launcher that never answers.
+const LAUNCHER_RELEASE_WAIT_MS = 500;
+
+// Stop the launcher's splash spinner BEFORE clearing the screen, and wait
+// until it says it has stopped.
+//
+// The launcher spawns us with the three standard streams inherited, so it
+// cannot see our output: there is no pipe to watch. Its spinner repaints with
+// a bare \r every 120 ms. "flint:ready" used to be sent after Ink's first
+// render, so a tick landing between the clear below and that message wrote
+// "loading..." onto the top line of the cleared screen, where Ink then drew
+// its border on the same row (owner, 2026-10-02, intermittent). The launcher
+// stops the interval first and answers "flint:released" after, so once the
+// answer is here no tick can follow. The wait is capped: an older launcher
+// never answers, and a missing answer must not hold the start.
+//
+// Sent only when there is a channel: run directly (`node src/index.js`,
+// tests) there is no parent IPC and process.send is undefined, which is a
+// normal way to start Flint and must not throw.
+if (process.send) {
+  await new Promise((resolve) => {
+    const done = () => { clearTimeout(timer); process.off("message", onMessage); resolve(); };
+    const onMessage = (msg) => { if (msg && msg.type === "flint:released") done(); };
+    const timer = setTimeout(done, LAUNCHER_RELEASE_WAIT_MS);
+    process.on("message", onMessage);
+    process.send({ type: "flint:ready" });
+  });
+}
+
 // Clear entire screen (remove launcher splash) before Ink takes over
 if (cli.action !== "headless") {
   process.stdout.write("\x1b[2J\x1b[3J\x1b[H");
@@ -243,23 +273,6 @@ const inkInstance = cli.action !== "headless" ? render(h(App, { store, onSubmit:
 if (inkInstance) {
   setInkActive(true); // suppress stderr writes that corrupt Ink layout
   store.setState({ _inkClear: () => inkInstance.clear() });
-}
-
-// Tell the launcher we are drawing now, so it stops repainting its splash
-// spinner over this frame.
-//
-// The launcher spawns us with the three standard streams inherited, so it
-// cannot see our output: there is no pipe to watch. Its spinner repaints with
-// a bare \r, which the terminal reads as "back to column 0 of whatever line is
-// current now" — and once this frame exists, that is this line. The result was
-// the startup banner and the first few commands printed several times over.
-//
-// The message is sent only when there is a channel to send it on: run directly
-// (`node src/index.js`, tests, headless) there is no parent IPC and
-// process.send is undefined, which is a normal way to start Flint and must not
-// throw.
-if (process.send) {
-  process.send({ type: "flint:ready" });
 }
 
 // -- Graceful shutdown --

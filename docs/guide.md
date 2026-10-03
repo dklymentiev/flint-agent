@@ -368,7 +368,7 @@ list_agents()
 - Each child runs on its own HTTP port (auto-assigned from 3010 if not given) and has its own data folder.
 - `spawn_agent` also takes `model`, `task_id` (a task the child claims and reports on) and `visible` (open a console window).
 - Children inherit `AGENT_DENIED_PATHS`. At most `AGENT_MAX_CHILDREN` (default 5) run at once.
-- A child stops after `AGENT_CHILD_IDLE_TIMEOUT` seconds idle (default 60), but not while it works.
+- A child lives as long as its parent and stops about a minute after the parent is gone. `AGENT_CHILD_IDLE_TIMEOUT` makes it also stop after that many seconds idle (default 0, off), but not while it works.
 - Children can push datasets to the parent with `POST /dataset`.
 - The agent registry (`src/registry.js`) tracks running instances.
 
@@ -525,7 +525,7 @@ Set in the environment or in `.env` in Flint's folder. Selected variables:
 | `AGENT_WORKDIR` | none | Working folder for relative paths in file tools |
 | `AGENT_SHELL` | bash (Git Bash on Windows) | Shell for `run_command` |
 | `AGENT_MAX_CHILDREN` | `5` | Max child agents at once |
-| `AGENT_CHILD_IDLE_TIMEOUT` | `60` | Seconds before an idle child stops |
+| `AGENT_CHILD_IDLE_TIMEOUT` | `0` | Seconds before an idle child stops; 0 = never, it lives as long as its parent |
 | `AGENT_PROFILE` | `generic` | Profile at start (same as `--profile`) |
 | `AGENT_API_AUTO_APPROVE` | on | `0`: API callers get approval questions too |
 | `FLINT_API_TOKEN_FILE` | off | `1`: also accept the token in `~/.flint/api-token.json` (automation; see API Authentication) |
