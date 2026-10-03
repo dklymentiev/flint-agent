@@ -1,0 +1,60 @@
+node_modules/
+.env
+sessions/
+.permissions.json
+/memory/
+/MEMORY.md
+/knowledge/
+__pycache__/
+benchmark/logs/
+benchmark/task-subsets/
+.flint/
+
+# Generated docs
+docs/reference.json
+docs/reference.md
+
+# IDE / OS
+.idea/
+.vscode/
+*.swp
+.DS_Store
+Thumbs.db
+.env.local
+benchmark/stress-sessions/
+bench/results/
+benchmark/results/
+benchmark/gaia-results-*.json
+benchmark/predictions.jsonl
+benchmark/testbed*/
+tests/e2e/results/
+workspace/
+ts-convert/
+*.pyc
+
+# Secrets and certificates. Never in the repo: the one that showed up here was
+# a VPN CA sitting untracked in the root, one `git add -A` away from history.
+*.pem
+*.key
+*.p12
+
+# Scratch that accumulates in the root during a session
+tmp-*.mjs
+tmp-*.js
+!tests/helpers/tmp-dir.js
+gaia-debug.log
+file_list.txt
+
+# `nul` is not a file anyone meant to create. On Windows a shell that writes to
+# NUL without the device path leaves this behind in the working directory.
+nul
+
+# Gate scaffolding, written into a tree at scoring time and normally removed
+__gate__*
+
+# Private names for scripts/audit-check.sh, never committed
+.audit-private
+
+# Scratch scripts
+*.tmp.mjs
+*.tmp.py

@@ -1,0 +1,20 @@
+name: Feature request
+description: Something Flint should do that it does not
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What you are trying to do and where Flint gets in the way.
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: What you would like
+      description: How it could work. Commands, settings or an example session help.
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: What you tried instead

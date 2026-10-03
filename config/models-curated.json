@@ -1,0 +1,4 @@
+{
+  "_comment": "Curated model prefixes for OpenRouter. Empty array = show all text/chat models (non-chat models like audio, image, embedding are always filtered out).",
+  "openrouter": []
+}

@@ -1,0 +1,34 @@
+{
+  "desktop": {
+    "prompt": "desktop.md",
+    "contextMode": "window",
+    "windowSize": 15,
+    "description": "Desktop agent with screen control"
+  },
+  "generic": {
+    "prompt": "generic.md",
+    "contextMode": "full",
+    "description": "General-purpose assistant, full history (compression trims it)"
+  },
+  "generic-full": {
+    "prompt": "generic.md",
+    "contextMode": "full",
+    "description": "General-purpose assistant, full context"
+  },
+  "generic-mini": {
+    "prompt": "generic.md",
+    "contextMode": "mini",
+    "description": "General-purpose assistant, mini context"
+  },
+  "marketer": {
+    "prompt": "marketer.md",
+    "contextMode": "window",
+    "windowSize": 15,
+    "description": "Digital marketer & copywriter"
+  },
+  "ux-reviewer": {
+    "prompt": "ux-reviewer.md",
+    "contextMode": "full",
+    "description": "UX/UI specialist for terminal app review"
+  }
+}

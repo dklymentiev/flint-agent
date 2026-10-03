@@ -1,0 +1,74 @@
+{
+  "openrouter": {
+    "name": "OpenRouter",
+    "format": "openai",
+    "baseUrl": "https://openrouter.ai/api/v1",
+    "authType": "bearer",
+    "modelsEndpoint": "/models",
+    "keyRequired": true,
+    "headers": {
+      "HTTP-Referer": "https://klymentiev.com/projects/flint",
+      "X-Title": "Flint"
+    },
+    "defaultModel": "google/gemini-2.5-flash",
+    "balanceEndpoint": "/credits"
+  },
+  "openai": {
+    "name": "OpenAI",
+    "format": "openai",
+    "baseUrl": "https://api.openai.com/v1",
+    "authType": "bearer",
+    "modelsEndpoint": "/models",
+    "keyRequired": true,
+    "defaultModel": "gpt-4o"
+  },
+  "anthropic": {
+    "name": "Anthropic",
+    "format": "anthropic",
+    "baseUrl": "https://api.anthropic.com/v1",
+    "authType": "x-api-key",
+    "keyRequired": true,
+    "headers": {
+      "anthropic-version": "2023-06-01"
+    },
+    "defaultModel": "claude-sonnet-4-6",
+    "modelsEndpoint": "/models?limit=100"
+  },
+  "groq": {
+    "name": "Groq",
+    "format": "openai",
+    "baseUrl": "https://api.groq.com/openai/v1",
+    "authType": "bearer",
+    "modelsEndpoint": "/models",
+    "keyRequired": true,
+    "defaultModel": "llama-3.3-70b-versatile"
+  },
+  "together": {
+    "name": "Together",
+    "format": "openai",
+    "baseUrl": "https://api.together.xyz/v1",
+    "authType": "bearer",
+    "modelsEndpoint": "/models",
+    "keyRequired": true,
+    "defaultModel": "meta-llama/Llama-3.3-70B-Instruct-Turbo"
+  },
+  "ollama": {
+    "name": "Ollama (local)",
+    "format": "openai",
+    "baseUrl": "http://localhost:11434",
+    "authType": "none",
+    "modelsEndpoint": "/api/tags",
+    "keyRequired": false,
+    "defaultModel": "llama3.2",
+    "ollamaCompat": true
+  },
+  "gemini": {
+    "name": "Gemini (OpenAI-compat)",
+    "format": "openai",
+    "baseUrl": "https://generativelanguage.googleapis.com/v1beta/openai",
+    "authType": "bearer",
+    "modelsEndpoint": "/models",
+    "keyRequired": true,
+    "defaultModel": "gemini-3-flash-preview"
+  }
+}

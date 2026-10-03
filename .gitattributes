@@ -1,0 +1,28 @@
+# Left out of `git archive`, so out of every published copy. These are the
+# internal comparison runs against other agents (the owner, 2026-10-02:
+# comparisons belong in blog posts, not in the project), and the one test
+# that imports their tooling, which would fail in a copy without it.
+bench/ export-ignore
+benchmark/ export-ignore
+scripts/readiness-* export-ignore
+tests/unit/readiness-tool-map.test.js export-ignore
+
+# Shell scripts keep LF line ends on every platform, or bash cannot run them.
+*.sh text eol=lf
+
+# Internal process documents, not linked from the public docs: the old
+# architecture vision (v0.9.6), the roadmap and the functional spec.
+docs/architecture.md export-ignore
+docs/roadmap.md export-ignore
+docs/functional-spec.md export-ignore
+
+# The internal changelog, from the first version to 1.13.3. The public one
+# (CHANGELOG.md) starts at 1.14.0, the first public release.
+history/ export-ignore
+
+# Not part of the public release: the Dockerfile is undocumented and its
+# container cannot be reached (the API binds 127.0.0.1 inside it), and
+# subagents/ is an old sample nothing loads.
+Dockerfile export-ignore
+.dockerignore export-ignore
+subagents/ export-ignore

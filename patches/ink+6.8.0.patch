@@ -1,0 +1,78 @@
+diff --git a/node_modules/ink/build/ink.js b/node_modules/ink/build/ink.js
+index 30019a0..da6ec76 100644
+--- a/node_modules/ink/build/ink.js
++++ b/node_modules/ink/build/ink.js
+@@ -205,7 +205,9 @@ export default class Ink {
+         const currentWidth = this.getTerminalWidth();
+         if (currentWidth < this.lastTerminalWidth) {
+             // We clear the screen when decreasing terminal width to prevent duplicate overlapping re-renders.
+-            this.log.clear();
++            // Flint patch: reflow-aware clear (see log-update.js reflowClear).
++            if (this.log.reflowClear) this.log.reflowClear(currentWidth);
++            else this.log.clear();
+             this.lastOutput = '';
+             this.lastOutputToRender = '';
+         }
+diff --git a/node_modules/ink/build/log-update.js b/node_modules/ink/build/log-update.js
+index 73e297d..a663261 100644
+--- a/node_modules/ink/build/log-update.js
++++ b/node_modules/ink/build/log-update.js
+@@ -1,5 +1,6 @@
+ import ansiEscapes from 'ansi-escapes';
+ import cliCursor from 'cli-cursor';
++import stringWidth from 'string-width';
+ import { cursorPositionChanged, buildCursorSuffix, buildCursorOnlySequence, buildReturnToBottomPrefix, hideCursorEscape, } from './cursor-helpers.js';
+ // Count visible lines in a string, ignoring the trailing empty element
+ // that `split('\n')` produces when the string ends with '\n'.
+@@ -55,6 +56,29 @@ const createStandard = (stream, { showCursor = false } = {}) => {
+         cursorWasShown = activeCursor !== undefined;
+         return true;
+     };
++    // Flint patch: clear after the terminal got narrower. The terminal has
++    // reflowed every line wider than the new width onto several rows, so the
++    // old line count and cursor offsets no longer match the screen; clearing
++    // by them erased rows of history above the output. Move up to where the
++    // output now starts, from the cursor's reflowed row, and erase everything
++    // below it.
++    render.reflowClear = (width) => {
++        const w = Math.max(1, width);
++        const lines = previousOutput.split('\n');
++        const heights = lines.map((l) => Math.max(1, Math.ceil(stringWidth(l) / w)));
++        let up;
++        if (cursorWasShown && previousCursorPosition) {
++            up = heights.slice(0, previousCursorPosition.y).reduce((a, b) => a + b, 0) + Math.floor(previousCursorPosition.x / w);
++        }
++        else {
++            up = heights.reduce((a, b) => a + b, 0) - 1;
++        }
++        stream.write(hideCursorEscape + (up > 0 ? ansiEscapes.cursorUp(up) : '') + ansiEscapes.cursorTo(0) + ansiEscapes.eraseDown);
++        previousOutput = '';
++        previousLineCount = 0;
++        previousCursorPosition = undefined;
++        cursorWasShown = false;
++    };
+     render.clear = () => {
+         const prefix = buildReturnToBottomPrefix(cursorWasShown, previousLineCount, previousCursorPosition);
+         stream.write(prefix + ansiEscapes.eraseLines(previousLineCount));
+diff --git a/node_modules/ink/build/parse-keypress.js b/node_modules/ink/build/parse-keypress.js
+index c169ef4..6fbec34 100644
+--- a/node_modules/ink/build/parse-keypress.js
++++ b/node_modules/ink/build/parse-keypress.js
+@@ -163,7 +163,7 @@ const kittyCodepointNames = {
+     // 13 (return) and 32 (space) are handled before this lookup
+     // in parseKittyKeypress so they can be marked as printable.
+     9: 'tab',
+-    127: 'delete',
++    127: 'backspace',
+     8: 'backspace',
+     57358: 'capslock',
+     57359: 'scrolllock',
+@@ -431,7 +431,7 @@ const parseKeypress = (s = '') => {
+     else if (s === '\x7f' || s === '\x1b\x7f') {
+         // TODO(vadimdemedes): `enquirer` detects delete key as backspace, but I had to split them up to avoid breaking changes in Ink. Merge them back together in the next major version.
+         // delete
+-        key.name = 'delete';
++        key.name = 'backspace';
+         key.meta = s.charAt(0) === '\x1b';
+     }
+     else if (s === '\x1b' || s === '\x1b\x1b') {

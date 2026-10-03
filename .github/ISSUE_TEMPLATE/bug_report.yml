@@ -1,0 +1,46 @@
+name: Bug report
+description: Something in Flint does not work as it should
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what happened instead.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. flint --provider ...
+        2. typed ...
+        3. saw ...
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Flint version
+      description: Output of `flint --version`.
+    validations:
+      required: true
+  - type: input
+    id: env
+    attributes:
+      label: OS, Node version, terminal
+      placeholder: Windows 11, Node 22.12, Windows Terminal
+    validations:
+      required: true
+  - type: input
+    id: model
+    attributes:
+      label: Provider and model
+      placeholder: openrouter, google/gemini-2.5-flash
+  - type: textarea
+    id: logs
+    attributes:
+      label: Output or logs
+      description: Remove API keys, tokens and anything private before pasting.
+      render: text

@@ -1,0 +1,169 @@
+import { describe, it, expect } from "vitest";
+import { detectIntentSync as detectIntent, getToolCategory, filterToolsByIntent } from "../../../src/tools/intent.js";
+
+describe("detectIntent", () => {
+  describe("core always included", () => {
+    it("includes core for any message", () => {
+      expect(detectIntent("hello").has("core")).toBe(true);
+      expect(detectIntent("").has("core")).toBe(true);
+    });
+  });
+
+  describe("desktop intent", () => {
+    it("detects screenshot", () => {
+      expect(detectIntent("Take a screenshot").has("desktop")).toBe(true);
+    });
+
+    it("detects click/desktop", () => {
+      expect(detectIntent("Click on the button").has("desktop")).toBe(true);
+      expect(detectIntent("Open desktop app").has("desktop")).toBe(true);
+    });
+
+    it("detects browser", () => {
+      expect(detectIntent("Open Chrome browser").has("desktop")).toBe(true);
+    });
+
+    it.skip("detects Russian desktop commands (requires AI mode)", () => {
+      expect(detectIntent("Открой браузер").has("desktop")).toBe(true);
+      expect(detectIntent("Запусти калькулятор").has("desktop")).toBe(true);
+      expect(detectIntent("Нажми на кнопку").has("desktop")).toBe(true);
+      expect(detectIntent("Скриншот рабочего стола").has("desktop")).toBe(true);
+    });
+  });
+
+  describe("email intent", () => {
+    it("detects email keywords", () => {
+      expect(detectIntent("Send an email").has("email")).toBe(true);
+      expect(detectIntent("Check inbox").has("email")).toBe(true);
+      expect(detectIntent("Gmail messages").has("email")).toBe(true);
+    });
+
+    it.skip("detects Russian email (requires AI mode)", () => {
+      expect(detectIntent("Отправь письмо").has("email")).toBe(true);
+      expect(detectIntent("Проверь почту").has("email")).toBe(true);
+    });
+  });
+
+  describe("process intent", () => {
+    it("detects process keywords", () => {
+      expect(detectIntent("Kill the process").has("process")).toBe(true);
+      expect(detectIntent("Run in background").has("process")).toBe(true);
+      expect(detectIntent("Check PID 1234").has("process")).toBe(true);
+    });
+  });
+
+  describe("web intent", () => {
+    it("detects web keywords", () => {
+      expect(detectIntent("Fetch this URL").has("web")).toBe(true);
+      expect(detectIntent("Search online for React").has("web")).toBe(true);
+      expect(detectIntent("Download the file").has("web")).toBe(true);
+    });
+  });
+
+  describe("memory intent", () => {
+    it("detects memory keywords", () => {
+      expect(detectIntent("Remember this fact").has("memory")).toBe(true);
+      expect(detectIntent("Forget about that").has("memory")).toBe(true);
+      // Russian: requires AI mode
+      // expect(detectIntent("Запомни это").has("memory")).toBe(true);
+    });
+  });
+
+  describe("planning intent", () => {
+    it("detects planning keywords", () => {
+      expect(detectIntent("Create a plan").has("planning")).toBe(true);
+      expect(detectIntent("List my tasks").has("planning")).toBe(true);
+      // Russian: requires AI mode
+      // expect(detectIntent("Создай задачу").has("planning")).toBe(true);
+    });
+  });
+
+  describe("control intent", () => {
+    it("detects model/provider switching", () => {
+      expect(detectIntent("Switch to Claude model").has("control")).toBe(true);
+      expect(detectIntent("Switch provider to openai").has("control")).toBe(true);
+      expect(detectIntent("Check my balance").has("control")).toBe(true);
+    });
+  });
+
+  describe("default filesystem", () => {
+    it("adds filesystem when no specific intent detected", () => {
+      const intents = detectIntent("List files in current directory");
+      expect(intents.has("filesystem")).toBe(true);
+    });
+
+    it("does not add filesystem when specific intent found", () => {
+      const intents = detectIntent("Take a screenshot");
+      expect(intents.has("filesystem")).toBe(false);
+      expect(intents.has("desktop")).toBe(true);
+    });
+  });
+
+  describe("multiple intents", () => {
+    it("detects multiple intents in one message", () => {
+      const intents = detectIntent("Take a screenshot and send it by email");
+      expect(intents.has("desktop")).toBe(true);
+      expect(intents.has("email")).toBe(true);
+      expect(intents.has("core")).toBe(true);
+    });
+  });
+});
+
+describe("getToolCategory", () => {
+  it("returns correct category for built-in tools", () => {
+    expect(getToolCategory("read_file")).toBe("core");
+    expect(getToolCategory("write_file")).toBe("core");
+    expect(getToolCategory("web_fetch")).toBe("web");
+    expect(getToolCategory("spawn_agent")).toBe("agent");
+    expect(getToolCategory("memory_search")).toBe("memory");
+  });
+
+  it("returns desktop for screenbox MCP tools", () => {
+    expect(getToolCategory("mcp_screenbox_desktop_screenshot")).toBe("desktop");
+    expect(getToolCategory("mcp_screenbox_desktop_click")).toBe("desktop");
+  });
+
+  it("returns email for gmail MCP tools", () => {
+    expect(getToolCategory("mcp_gmail_send")).toBe("email");
+  });
+
+  it("returns mcp_other for unknown MCP tools", () => {
+    expect(getToolCategory("mcp_custom_tool")).toBe("mcp_other");
+  });
+
+  it("returns unknown for unrecognized tools", () => {
+    expect(getToolCategory("some_random_tool")).toBe("unknown");
+  });
+});
+
+describe("filterToolsByIntent", () => {
+  const mockTools = [
+    { function: { name: "read_file" } },
+    { function: { name: "write_file" } },
+    { function: { name: "web_fetch" } },
+    { function: { name: "spawn_agent" } },
+    { function: { name: "mcp_screenbox_desktop_screenshot" } },
+    { function: { name: "mcp_gmail_send" } },
+  ];
+
+  it("filters to core only", () => {
+    const filtered = filterToolsByIntent(mockTools, new Set(["core"]));
+    expect(filtered.map(t => t.function.name)).toEqual(["read_file", "write_file"]);
+  });
+
+  it("filters to core + desktop", () => {
+    const filtered = filterToolsByIntent(mockTools, new Set(["core", "desktop"]));
+    const names = filtered.map(t => t.function.name);
+    expect(names).toContain("read_file");
+    expect(names).toContain("mcp_screenbox_desktop_screenshot");
+    expect(names).not.toContain("web_fetch");
+  });
+
+  it("filters to core + web", () => {
+    const filtered = filterToolsByIntent(mockTools, new Set(["core", "web"]));
+    const names = filtered.map(t => t.function.name);
+    expect(names).toContain("read_file");
+    expect(names).toContain("web_fetch");
+    expect(names).not.toContain("mcp_screenbox_desktop_screenshot");
+  });
+});

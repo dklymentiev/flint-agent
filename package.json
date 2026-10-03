@@ -1,0 +1,92 @@
+{
+  "name": "flint-agent",
+  "version": "1.14.0",
+  "description": "A lightweight AI agent for the terminal that works with any LLM, free tiers included: files, commands, web, MCP",
+  "type": "module",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/launcher.js",
+    "dev": "node src/index.js",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "test:unit": "vitest run --config vitest.config.unit.js",
+    "test:integration": "vitest run --config vitest.config.integration.js",
+    "test:all": "vitest run --config vitest.config.unit.js && vitest run --config vitest.config.integration.js",
+    "postinstall": "patch-package"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.12.1",
+    "better-sqlite3": "^12.6.2",
+    "chalk": "^5.6.2",
+    "cli-highlight": "^2.1.11",
+    "dotenv": "^16.4.7",
+    "ink": "6.8.0",
+    "patch-package": "^8.0.1",
+    "react": "^19.2.4",
+    "sqlite-vec": "^0.1.9",
+    "string-width": "^8.1.1",
+    "wrap-ansi": "^9.0.0",
+    "zustand": "^5.0.0"
+  },
+  "devDependencies": {
+    "@vitest/coverage-v8": "^4.0.18",
+    "@xterm/headless": "^6.0.0",
+    "ink-testing-library": "^4.0.0",
+    "vitest": "^4.0.18"
+  },
+  "bin": {
+    "flint": "./bin/flint.js"
+  },
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "files": [
+    "bin/",
+    "src/",
+    "config/",
+    "profiles/",
+    "patches/",
+    ".env.example",
+    "LICENSE",
+    "README.md",
+    "system.md",
+    "CHANGELOG.md",
+    "FEATURES.md"
+  ],
+  "keywords": [
+    "ai-agent",
+    "coding-agent",
+    "ai-cli",
+    "cli",
+    "terminal",
+    "openrouter",
+    "openrouter-free",
+    "free-llm",
+    "free-llm-api",
+    "free-models",
+    "llm",
+    "llm-cli",
+    "mcp",
+    "nodejs",
+    "ai",
+    "agent",
+    "gemini",
+    "claude",
+    "gpt",
+    "tools",
+    "automation",
+    "ink",
+    "react"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/dklymentiev/flint-agent.git"
+  },
+  "homepage": "https://github.com/dklymentiev/flint-agent#readme",
+  "bugs": {
+    "url": "https://github.com/dklymentiev/flint-agent/issues"
+  },
+  "author": "Dmytro Klymentiev",
+  "license": "MIT"
+}
