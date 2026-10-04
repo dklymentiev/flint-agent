@@ -97,6 +97,38 @@ describe("compressHeadTail (via compressContext)", () => {
   });
 });
 
+// With swap on, tool results are swap's to move. A result cut here cannot be
+// read back, so compression leaves them whole and still does the rest.
+describe("with keepToolResults (swap is on)", () => {
+  const long = Array.from({ length: 40 }, (_, i) => `line ${i} of the file, long enough to matter`).join("\n");
+
+  it("leaves a tool result of the previous call and an older one whole", async () => {
+    const messages = [
+      { role: "tool", tool_call_id: "1", content: long, _toolName: "read_file", _toolArgs: { path: "old.txt" } },
+      { role: "tool", tool_call_id: "2", content: long, _toolName: "read_file", _toolArgs: { path: "prev.txt" } },
+      { role: "user", content: "now" },
+    ];
+    await compressContext(messages, 1, 2, null, { forceCompress: true, keepToolResults: true });
+    expect(messages[0].content).toBe(long);
+    expect(messages[1].content).toBe(long);
+    expect(messages[0]._compressed).toBeUndefined();
+    expect(messages[1]._compressed).toBeUndefined();
+  });
+
+  it("still turns an old screenshot into its text", async () => {
+    const messages = [
+      {
+        role: "user", _isImage: true, _imageTool: "desktop_screenshot", _imagePath: "shot.png",
+        content: [{ type: "text", text: "a window with a table" }, { type: "image_url", image_url: { url: "data:image/png;base64,abc" } }],
+      },
+      { role: "user", content: "next" },
+    ];
+    await compressContext(messages, 0, 1, null, { forceCompress: true, keepToolResults: true });
+    expect(typeof messages[0].content).toBe("string");
+    expect(messages[0].content).toContain("Image from desktop_screenshot");
+  });
+});
+
 describe("image message compression", () => {
   it("compresses image_url messages to text", async () => {
     const messages = [

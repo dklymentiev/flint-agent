@@ -323,7 +323,7 @@ export async function runAgent(messages, callbacks = {}, { sessionId, signal, se
     ? {
       store: createSwapStore(path.join(config.sessionsDir || ".", sessionId || "_nosession", "swap")),
       settings: swapSettings(),
-      // Asleep below this; the lossy compression's threshold is above it.
+      // Asleep below this, three quarters of the compression threshold.
       from: swapFromTokens({ compressThreshold: compressThreshold() }),
       conv: convSettings({ window: contextWindow() }),
     }
@@ -799,8 +799,12 @@ export async function runAgent(messages, callbacks = {}, { sessionId, signal, se
     // not extend the previous payload, they rewrote it, and thirteen of those
     // first differed at a tool message, here. Deep compression next to this is
     // already behind a token threshold; this pass was not.
+    //
+    // Only without swap. With swap on, old results are swap's to move: a
+    // one-line summary written here cannot be read back, and a result that
+    // has become one line is no longer something swap can store.
     const contextNow = stats.contextTokens || 0;
-    if (prevIterationStart > 0 && contextNow >= eagerSummaryAfterTokens()) {
+    if (!swap && prevIterationStart > 0 && contextNow >= eagerSummaryAfterTokens()) {
       for (let i = 0; i < prevIterationStart; i++) {
         const m = messages[i];
         if (m.role === "tool" && !m._summarized && m.content && m.content.length > 500) {
@@ -814,7 +818,7 @@ export async function runAgent(messages, callbacks = {}, { sessionId, signal, se
     // Deep compress for very long sessions (threshold-based)
     if (iterationStart > 0) {
       try {
-        await compressContext(messages, prevIterationStart, iterationStart, sessionId);
+        await compressContext(messages, prevIterationStart, iterationStart, sessionId, { keepToolResults: !!swap });
       } catch {}
     }
 

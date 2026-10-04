@@ -7,11 +7,13 @@ import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { createMockStore } from "../helpers/mock-store.js";
 
-const { SESSIONS } = vi.hoisted(() => {
+const { SESSIONS, KNOBS } = vi.hoisted(() => {
   const { mkdtempSync } = require("node:fs");
   const { tmpdir } = require("node:os");
   const { join } = require("node:path");
-  return { SESSIONS: mkdtempSync(join(tmpdir(), "flint-swap-loop-")) };
+  // compressAfter: far away by default, so the lossy compression stays out of
+  // the swap tests; the test that is about the two together brings it near.
+  return { SESSIONS: mkdtempSync(join(tmpdir(), "flint-swap-loop-")), KNOBS: { compressAfter: 10_000_000 } };
 });
 
 vi.mock("../../src/config.js", () => ({
@@ -22,7 +24,7 @@ vi.mock("../../src/config.js", () => ({
     projectRoot: process.cwd(),
     sessionsDir: SESSIONS,
     maxIterations: 80,
-    compressAfterTokens: 10_000_000,   // today's compression stays out of the way
+    get compressAfterTokens() { return KNOBS.compressAfter; },
   },
 }));
 vi.mock("../../src/agent/modes.js", () => ({ getModeForIntent: () => null, listModes: () => [] }));
@@ -48,8 +50,11 @@ function sse(delta) {
   return new ReadableStream({ pull(c) { if (done) { c.close(); return; } c.enqueue(bytes); done = true; } });
 }
 
-/** Run the 30-page turn; return the payloads the model was sent. */
-async function run(sessionId, env = {}) {
+/**
+ * Run the 30-page turn; return the payloads the model was sent.
+ * `earlier` is what was said before this turn (a long talk, for example).
+ */
+async function run(sessionId, env = {}, earlier = []) {
   for (const k of ["FLINT_SWAP", "FLINT_SWAP_RESULT_MAX", "FLINT_SWAP_BUDGET", "FLINT_SWAP_LOW_WATER", "FLINT_SWAP_FROM"]) delete process.env[k];
   Object.assign(process.env, env);
   vi.resetModules();
@@ -75,6 +80,7 @@ async function run(sessionId, env = {}) {
   );
   const messages = [
     { role: "system", content: "You are helpful" },
+    ...earlier,
     { role: "user", content: "Read pages 1 to 30." },
   ];
   await runAgent(messages, {}, { sessionId });
@@ -130,6 +136,67 @@ describe("swap in the agent loop", () => {
     expect(String(result.content).length).toBeLessThan(page(1).length / 2);
     const index = readFileSync(path.join(SESSIONS, "swap-arrival", "swap", "index.jsonl"), "utf8").trim().split("\n");
     expect(index).toHaveLength(PAGES);
+  }, 60000);
+
+  // New is whole, old is swapped: with the settings a session really
+  // runs on, the page the model has just asked for is in the next payload in
+  // full. Before, at level normal anything over 4 KB arrived as a head and an
+  // outline, and the agent reported a file as read that it had seen a third of.
+  it("a result that fits the budget arrives whole, on default settings with swap awake", async () => {
+    try {
+      const payloads = await run("swap-fresh-whole", { FLINT_SWAP_FROM: "0", FLINT_SPEND: "normal" });
+      expect(payloads.length).toBe(PAGES + 1);
+      for (let k = 1; k <= PAGES; k++) {
+        const latest = payloads[k].filter((m) => m.role === "tool").at(-1);
+        expect(String(latest.content).includes(page(k)), `page ${k} in the call after it was read`).toBe(true);
+      }
+      // And the old ones did leave: the context is still bounded.
+      const { swapSettings } = await import("../../src/agent/swap.js");
+      const budget = swapSettings({}, "normal").budgetTokens;
+      for (const p of payloads) expect(toolTokens(p)).toBeLessThanOrEqual(budget + latestCallTokens(p));
+    } finally {
+      delete process.env.FLINT_SPEND;
+    }
+  }, 60000);
+
+  // Past the compression threshold a result is whole or it is in swap. The
+  // lossy compression used to get there first: it counts the whole context,
+  // conversation included, so a long talk put every turn over its threshold,
+  // and a file read one turn earlier was cut to its first eight and last
+  // three lines with nothing stored. No test saw it, because every test here
+  // kept that threshold at ten million.
+  it("past the compression threshold a result is whole or in swap, never cut", async () => {
+    KNOBS.compressAfter = 20000;
+    try {
+      // 120 KB of talk before the turn: about 30k tokens, over the threshold
+      // by itself, and nothing swap's budget for tool results can bring down.
+      const talk = [
+        { role: "user", content: "notes ".repeat(20000) },
+        { role: "assistant", content: "Noted." },
+      ];
+      // The conversation's own swap is kept far away: this test is about the
+      // tool results while the talk is still in the context.
+      const payloads = await run("swap-with-compression", { FLINT_SPEND: "normal", FLINT_SWAP_CONV_HIGH: "10000000" }, talk);
+      expect(payloads.length).toBe(PAGES + 1);
+      const { createSwapStore } = await import("../../src/agent/swap.js");
+      const store = createSwapStore(path.join(SESSIONS, "swap-with-compression", "swap"));
+      const stored = new Set(store.list().map((e) => e.source));
+      for (const [i, p] of payloads.entries()) {
+        for (const m of p.filter((x) => x.role === "tool")) {
+          const text = String(m.content);
+          const whole = /# Page \d+\n\n(word\d+ ){1900}end/.test(text);
+          const stub = /\[swap #\d+ /.test(text);
+          expect(whole || stub, `call ${i + 1}: a result that is neither whole nor a stub: ${text.slice(0, 120)}`).toBe(true);
+        }
+      }
+      // And what left is in the store, to the byte.
+      expect(stored.size).toBeGreaterThan(0);
+      for (const e of store.list()) expect(store.read(e.id)).toBe(page(Number(e.source.match(/p(\d+)$/)[1])));
+    } finally {
+      KNOBS.compressAfter = 10_000_000;
+      delete process.env.FLINT_SPEND;
+      delete process.env.FLINT_SWAP_CONV_HIGH;
+    }
   }, 60000);
 
   it("B1/B2 dormant below swapFrom, then it engages", async () => {

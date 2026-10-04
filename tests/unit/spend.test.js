@@ -37,9 +37,22 @@ describe("what each level sets (S1, S2)", () => {
     expect(compressThresholdFor(M, "normal")).toBe(128000);
     expect(compressThresholdFor(200_000, "normal")).toBe(100000);
     expect(compressThresholdFor(null, "normal")).toBe(64000);
-    expect(swapSettings({}, "normal")).toEqual({ resultMax: 4096, budgetTokens: 16000, lowWater: 0.6, minBytes: 1024, headBytes: 1500 });
+    expect(swapSettings({}, "normal")).toEqual({ resultMax: 64000, budgetTokens: 16000, lowWater: 0.6, minBytes: 1024, headBytes: 1500 });
     expect(swapFromTokens({ env: {}, compressThreshold: 128000, level: "normal" })).toBe(96000);
-    expect(convSettings({ env: {}, window: M, level: "normal" })).toEqual({ high: 300000, chunk: 100000, keepTurns: 4 });
+    expect(convSettings({ env: {}, window: M, level: "normal" })).toEqual({ high: 128000, chunk: 42666, keepTurns: 4 });
+  });
+
+  // The conversation's swap used to start at 300k while compression started
+  // at 128k. In between, the context was over the compression threshold on
+  // the weight of the conversation alone, and compression cut tool results
+  // that swap had room for. The two start together now, at every level and
+  // for every window.
+  it("the conversation's swap starts where the compression threshold is", () => {
+    for (const level of ["economy", "normal", "generous"]) {
+      for (const window of [M, 200_000, 32_000, null]) {
+        expect(convSettings({ env: {}, window, level }).high, `${level}, window ${window}`).toBe(compressThresholdFor(window, level));
+      }
+    }
   });
 
   it("economy: tools through search early, compression and swap early", () => {
@@ -47,9 +60,8 @@ describe("what each level sets (S1, S2)", () => {
     expect(compressThresholdFor(M, "economy")).toBe(64000);
     expect(compressThresholdFor(200_000, "economy")).toBe(50000);
     expect(compressThresholdFor(null, "economy")).toBe(32000);
-    expect(swapSettings({}, "economy")).toMatchObject({ resultMax: 2048, budgetTokens: 8000, headBytes: 1024 });
+    expect(swapSettings({}, "economy")).toMatchObject({ resultMax: 32000, budgetTokens: 8000, headBytes: 1024 });
     expect(swapFromTokens({ env: {}, compressThreshold: 64000, level: "economy" })).toBe(32000);
-    expect(convSettings({ env: {}, window: M, level: "economy" }).high).toBe(150000);
     expect(spendSettings("economy").advice).toBe(true);
   });
 
@@ -57,9 +69,8 @@ describe("what each level sets (S1, S2)", () => {
     expect(mcpInlineMax({}, "generous")).toBe(200);
     expect(compressThresholdFor(M, "generous")).toBe(800000);
     expect(compressThresholdFor(null, "generous")).toBe(200000);
-    expect(swapSettings({}, "generous")).toMatchObject({ resultMax: 16384, budgetTokens: 64000, headBytes: 4096 });
+    expect(swapSettings({}, "generous")).toMatchObject({ resultMax: 256000, budgetTokens: 64000, headBytes: 4096 });
     expect(swapFromTokens({ env: {}, compressThreshold: 800000, level: "generous" })).toBe(720000);
-    expect(convSettings({ env: {}, window: M, level: "generous" }).high).toBe(850000);
     expect(spendSettings("generous").advice).toBe(false);
   });
 

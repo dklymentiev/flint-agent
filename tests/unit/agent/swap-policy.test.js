@@ -36,7 +36,7 @@ describe("settings", () => {
   it("is on unless FLINT_SWAP=0, with the documented defaults", () => {
     expect(swapEnabled({})).toBe(true);
     expect(swapEnabled({ FLINT_SWAP: "0" })).toBe(false);
-    expect(swapSettings({})).toEqual({ resultMax: 4096, budgetTokens: 16000, lowWater: 0.6, minBytes: 1024, headBytes: 1500 });
+    expect(swapSettings({})).toEqual({ resultMax: 64000, budgetTokens: 16000, lowWater: 0.6, minBytes: 1024, headBytes: 1500 });
     expect(swapSettings({ FLINT_SWAP_BUDGET: "1000", FLINT_SWAP_RESULT_MAX: "100", FLINT_SWAP_LOW_WATER: "0.5" }))
       .toMatchObject({ budgetTokens: 1000, resultMax: 100, lowWater: 0.5 });
   });
@@ -121,6 +121,35 @@ describe("eviction (A6)", () => {
     for (const i of plan) expect(m[i].role).toBe("tool");
     expect(plan).not.toContain(4);
     expect(plan).not.toContain(2);
+  });
+
+  // The live case (2026-10-03): turn 52 of a long session, 475 stubs
+  // in the history. They cannot be evicted, yet they were counted, so the sum
+  // stood at the budget for good and the file the operator had just pointed
+  // at was swapped out one call after it was read.
+  it("stubs do not use up the budget: a long session keeps the file it has just read", () => {
+    const m = [{ role: "system", content: "You are FLINT." }, { role: "user", content: "earlier work" }];
+    for (let n = 1; n <= 475; n++) {
+      m.push({ role: "assistant", content: "", tool_calls: [{ id: `old${n}`, type: "function", function: { name: "read_file", arguments: "{}" } }] });
+      m.push({ role: "tool", tool_call_id: `old${n}`, _swap: n, content: stubFor({ id: n, kind: "file", source: `C:/Projects/some/long/path/to/file-number-${n}.js`, bytes: 9000, title: `File number ${n} of the earlier work`, turn: 1 }) });
+    }
+    m.push({ role: "user", content: "read TASK.md and make a plan" });
+    m.push({ role: "assistant", content: "", tool_calls: [{ id: "task", type: "function", function: { name: "read_file", arguments: "{}" } }] });
+    const taskFile = m.push({ role: "tool", tool_call_id: "task", _toolName: "read_file", content: wrap("read_file", "# Build the landing page\n\n" + "line of the task\n".repeat(300)) }) - 1;
+    m.push({ role: "assistant", content: "", tool_calls: [{ id: "ls", type: "function", function: { name: "run_command", arguments: "{}" } }] });
+    m.push({ role: "tool", tool_call_id: "ls", _toolName: "run_command", content: wrap("run_command", "brief\nTASK.md") });
+
+    const normal = swapSettings({}, "normal");
+    expect(toolTokens(m)).toBeGreaterThan(normal.budgetTokens);   // the stubs alone are over it
+    expect(m[taskFile].content.length).toBeGreaterThan(5000);
+    expect(planEviction(m, normal)).toEqual([]);
+  });
+
+  it("at every spend level a result that fits the budget is under the arrival limit", () => {
+    for (const level of ["economy", "normal", "generous"]) {
+      const s = swapSettings({}, level);
+      expect(s.resultMax, level).toBeGreaterThanOrEqual(s.budgetTokens * 4);
+    }
   });
 
   it("a swap_read result goes back to its entry's stub, without a new entry", () => {

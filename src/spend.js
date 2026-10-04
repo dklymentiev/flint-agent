@@ -18,6 +18,12 @@ export const DEFAULT_SPEND = "normal";
  * The table of docs/spend-modes.md, as data. Fractions are of the model's
  * context window; `cap` is a ceiling in tokens (null: none); `unknown` is
  * used when the window is not known.
+ *
+ * `conv` is where the conversation's swap starts, and it is the same point
+ * as `compress`. It used to be far above it (300k against 128k at normal).
+ * Between the two the context was over the compression threshold whatever
+ * swap did with tool results, because the weight was the conversation, and
+ * nothing took the conversation down.
  */
 export const SPEND_LEVELS = {
   economy: {
@@ -25,8 +31,8 @@ export const SPEND_LEVELS = {
     mcpInlineMax: 10,
     compress: { fraction: 0.25, cap: 64000, unknown: 32000 },
     swapFromShare: 0.5,
-    swap: { resultMax: 2048, budgetTokens: 8000, headBytes: 1024 },
-    conv: { fraction: 0.4, cap: 150000, unknown: 60000 },
+    swap: { budgetTokens: 8000, headBytes: 1024 },
+    conv: { fraction: 0.25, cap: 64000, unknown: 32000 },
     advice: true,
   },
   normal: {
@@ -34,8 +40,8 @@ export const SPEND_LEVELS = {
     mcpInlineMax: 30,
     compress: { fraction: 0.5, cap: 128000, unknown: 64000 },
     swapFromShare: 0.75,
-    swap: { resultMax: 4096, budgetTokens: 16000, headBytes: 1500 },
-    conv: { fraction: 0.6, cap: 300000, unknown: 100000 },
+    swap: { budgetTokens: 16000, headBytes: 1500 },
+    conv: { fraction: 0.5, cap: 128000, unknown: 64000 },
     advice: false,
   },
   generous: {
@@ -43,8 +49,8 @@ export const SPEND_LEVELS = {
     mcpInlineMax: 200,
     compress: { fraction: 0.8, cap: null, unknown: 200000 },
     swapFromShare: 0.9,
-    swap: { resultMax: 16384, budgetTokens: 64000, headBytes: 4096 },
-    conv: { fraction: 0.85, cap: null, unknown: 200000 },
+    swap: { budgetTokens: 64000, headBytes: 4096 },
+    conv: { fraction: 0.8, cap: null, unknown: 200000 },
     advice: false,
   },
 };

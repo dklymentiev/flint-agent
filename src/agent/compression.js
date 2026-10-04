@@ -187,9 +187,16 @@ export function compressThresholdFor(window, level) {
  * @param {number} prevIterationStart
  * @param {number} iterationStart
  * @param {string} [sessionId]
+ * @param {object} [opts]
+ * @param {boolean} [opts.keepToolResults] leave tool results as they are:
+ *   swap is on and they are its to move. Cutting a result here loses it (there
+ *   is no stub and nothing to read back), and this threshold counts the whole
+ *   context, so a long conversation alone put every turn over it: a file read
+ *   one turn earlier came down to its first eight and last three lines while
+ *   swap's budget for results was a quarter full.
  * @returns {Promise<number>} tokens saved
  */
-export async function compressContext(messages, prevIterationStart, iterationStart, sessionId, { forceCompress = false } = {}) {
+export async function compressContext(messages, prevIterationStart, iterationStart, sessionId, { forceCompress = false, keepToolResults = false } = {}) {
   const estimatedTokens = estimateTokens(messages);
   const threshold = compressThreshold();
 
@@ -267,6 +274,7 @@ export async function compressContext(messages, prevIterationStart, iterationSta
     }
 
     if (m.role !== "tool") continue;
+    if (keepToolResults) continue;
     if (m._compressed === "summary") continue;
 
     if (!isOld && m.content.length <= COMPRESS_THRESHOLD) continue;

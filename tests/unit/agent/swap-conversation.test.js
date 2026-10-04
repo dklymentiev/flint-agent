@@ -46,10 +46,10 @@ describe("when swap wakes up (B1, B3)", () => {
 });
 
 describe("conversation swap", () => {
-  it("settings follow the window: 60% of it up to 300k, a third of that per chunk, 4 turns kept", () => {
-    expect(convSettings({ env: {}, window: 1_000_000 })).toEqual({ high: 300000, chunk: 100000, keepTurns: 4 });
-    expect(convSettings({ env: {}, window: 200_000 })).toEqual({ high: 120000, chunk: 40000, keepTurns: 4 });
-    expect(convSettings({ env: {}, window: null })).toEqual({ high: 100000, chunk: 33333, keepTurns: 4 });
+  it("settings follow the window: half of it up to 128k at level normal, a third of that per chunk, 4 turns kept", () => {
+    expect(convSettings({ env: {}, window: 1_000_000, level: "normal" })).toEqual({ high: 128000, chunk: 42666, keepTurns: 4 });
+    expect(convSettings({ env: {}, window: 200_000, level: "normal" })).toEqual({ high: 100000, chunk: 33333, keepTurns: 4 });
+    expect(convSettings({ env: {}, window: null, level: "normal" })).toEqual({ high: 64000, chunk: 21333, keepTurns: 4 });
     expect(convSettings({ env: { FLINT_SWAP_CONV_HIGH: "50000" }, window: null })).toMatchObject({ high: 50000, chunk: 16666 });
   });
 

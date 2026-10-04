@@ -7,8 +7,9 @@
     "modelsEndpoint": "/models",
     "keyRequired": true,
     "headers": {
-      "HTTP-Referer": "https://klymentiev.com/projects/flint",
-      "X-Title": "Flint"
+      "HTTP-Referer": "https://flintagent.dev",
+      "X-OpenRouter-Title": "Flint Agent",
+      "X-OpenRouter-Categories": "cli-agent,personal-agent"
     },
     "defaultModel": "google/gemini-2.5-flash",
     "balanceEndpoint": "/credits"

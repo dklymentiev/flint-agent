@@ -20,12 +20,12 @@ which tools ask.
 | | economy | normal (default) | generous |
 |---|---|---|---|
 | MCP tools offered whole (above: through `tool_search`) | 10 | 30 | 200 |
-| Lossy compression of old tool results starts at | a quarter of the window, at most 64k (32k unknown) | half the window, at most 128k (64k unknown) | 80% of the window, no cap (200k unknown) |
+| The compression threshold: with swap off, old tool results are cut from here; with swap on (the default) they are swap's, and this is where old screenshots turn into text and facts are extracted | a quarter of the window, at most 64k (32k unknown) | half the window, at most 128k (64k unknown) | 80% of the window, no cap (200k unknown) |
 | Swap wakes at (share of the compression threshold) | 50% | 75% | 90% |
-| A result bigger than this goes to swap on arrival (when awake) | 2 KB | 4 KB | 16 KB |
+| A result bigger than this goes to swap on arrival (when awake): the whole budget of the next row, in bytes | 32 KB | 64 KB | 256 KB |
 | Tool results kept in context once swap is awake | 8k tokens | 16k tokens | 64k tokens |
 | Head kept of a swapped result | 1 KB | 1.5 KB | 4 KB |
-| Conversation swap starts at | 40% of the window, at most 150k (60k unknown) | 60%, at most 300k (100k unknown) | 85%, no cap (200k unknown) |
+| Conversation swap starts at | the compression threshold | the compression threshold | the compression threshold |
 | Token-saving advice in the system prompt | yes | no | no |
 
 Money limits are not part of a mode: `AGENT_MAX_COST` and

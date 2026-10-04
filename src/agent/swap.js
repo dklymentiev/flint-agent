@@ -20,12 +20,18 @@ export function swapSettings(env = process.env, level = getSpendLevel(env)) {
   const int = (v, d) => (Number.isFinite(parseInt(v, 10)) ? parseInt(v, 10) : d);
   const num = (v, d) => (Number.isFinite(parseFloat(v)) ? parseFloat(v) : d);
   const lv = spendSettings(level).swap;
+  const budgetTokens = int(env.FLINT_SWAP_BUDGET, lv.budgetTokens);
   return {
-    // Set by the live 30-page run (2026-10-02): at 8 KB and 40k tokens the
-    // context still grew from 22k to 55k tokens a call and no old page was
-    // ever swapped out. Swap is for keeping the context thin.
-    resultMax: int(env.FLINT_SWAP_RESULT_MAX, lv.resultMax),
-    budgetTokens: int(env.FLINT_SWAP_BUDGET, lv.budgetTokens),
+    // New is whole, old is swapped. What the model has just asked for
+    // reaches it in full, and room is made by evicting what it read before.
+    // A result is cut on arrival only when it alone is bigger than everything
+    // the results may take, so the limit is the budget in bytes and not a
+    // number of its own. It was one: 4 KB at level normal, set for a run of
+    // web pages, and it cut a 5 KB task file the operator had pointed at to
+    // its first 1500 bytes; the agent said it had read the file and made up
+    // the rest (2026-10-03).
+    resultMax: int(env.FLINT_SWAP_RESULT_MAX, budgetTokens * 4),
+    budgetTokens,
     lowWater: num(env.FLINT_SWAP_LOW_WATER, 0.6),
     minBytes: int(env.FLINT_SWAP_MIN_BYTES, 1024),
     headBytes: int(env.FLINT_SWAP_HEAD, lv.headBytes),
@@ -228,7 +234,6 @@ export function getCurrentSwapStore() { return currentStore; }
 // ── Eviction ─────────────────────────────────────────────────
 
 const tokensOf = (content) => Math.ceil(String(content ?? "").length / 4);
-const STUB_TOKENS = 45;
 
 const WRAP_RE = /^<([\w-]+) name="([^"]*)">\n([\s\S]*)\n<\/\1>$/;
 function unwrap(content) {
@@ -243,10 +248,16 @@ function unwrap(content) {
  * the prompt cache from that message on). Never swapped: anything but a tool
  * result, the results of the latest call (not read yet), results under
  * `minBytes`, results swapped already.
+ *
+ * The budget is for what can be evicted. Stubs and small results stay
+ * whatever happens, so they are not counted: counted, the 475 stubs of a long
+ * session took 14k of a 16k budget by themselves, the sum never came down to
+ * the low-water mark, and every result was evicted one call after it arrived.
  */
 export function planEviction(messages, { budgetTokens = 40000, lowWater = 0.6, minBytes = 1024 } = {}) {
+  const evictable = (m) => m.role === "tool" && String(m.content ?? "").length >= minBytes;
   let total = 0;
-  for (const m of messages) if (m.role === "tool") total += tokensOf(m.content);
+  for (const m of messages) if (evictable(m)) total += tokensOf(m.content);
   if (total <= budgetTokens) return [];
   let lastCall = -1;
   for (let i = messages.length - 1; i >= 0; i--) {
@@ -260,10 +271,9 @@ export function planEviction(messages, { budgetTokens = 40000, lowWater = 0.6, m
     // it is old enough to go; then it shrinks to the stub. Left out, thirty
     // views kept the live run at 46-50k tokens a call (2026-10-02). A bare
     // stub is under minBytes and stays.
-    if (m.role !== "tool" || i > lastCall) continue;
-    if (String(m.content ?? "").length < minBytes) continue;
+    if (!evictable(m) || i > lastCall) continue;
     plan.push(i);
-    total -= tokensOf(m.content) - STUB_TOKENS;
+    total -= tokensOf(m.content);
   }
   return plan;
 }
@@ -347,7 +357,7 @@ export function contextTokensOf(messages) {
 
 // ── Conversation swap ────────────────────────────────────────
 
-/** 60% of the window up to 300k (100k when unknown); a third of that per chunk; 4 turns kept. */
+/** From the compression threshold (spend.js, `conv`); a third of that per chunk; 4 turns kept. */
 export function convSettings({ env = process.env, window = null, level = getSpendLevel(env) } = {}) {
   const int = (v) => (Number.isFinite(parseInt(v, 10)) ? parseInt(v, 10) : null);
   const high = int(env.FLINT_SWAP_CONV_HIGH) ?? windowShare(spendSettings(level).conv, window);

@@ -7,6 +7,36 @@ All notable changes to Flint are written here. The format follows
 Each version is a `## [x.y.z] - YYYY-MM-DD` heading: `/update` reads these
 headings to show what changed between your version and the newest one.
 
+## [1.14.5] - 2026-10-04
+
+### Fixed
+- Deep in a long session, a file or page the agent had just read reached the
+  model cut to its first kilobyte and a list of headings. The agent could
+  report it as read and describe parts it had not seen. A new result now
+  arrives whole unless it alone is bigger than the whole budget for tool
+  results (32, 64 or 256 KB by spend level), and room for it is made by
+  moving older results to swap.
+- Small leftovers of earlier results no longer use up that budget. In a
+  session with hundreds of them every new result used to be moved out one
+  call after it arrived.
+- Past the compression threshold (128k tokens at spend level normal) a result
+  read one turn earlier was cut to its first eight and last three lines, and
+  older ones to one line, with nothing to read them back from. With swap on,
+  which is the default, tool results are no longer cut: a result is whole, or
+  it is in swap and `swap_read` returns it.
+
+### Changed
+- Old turns of a long conversation move to swap from the compression
+  threshold (half the window, at most 128k at level normal) instead of from
+  300k. A long session now stays near that size instead of growing to it.
+  `FLINT_SWAP_CONV_HIGH` still sets the point by hand.
+- Requests to OpenRouter name the app as Flint Agent, with
+  `https://flintagent.dev` as its address.
+
+### Added
+- The app icon, in `assets/icon`: the SVG and the PNG and ICO sizes built
+  from it by `scripts/build-icons.mjs`.
+
 ## [1.14.4] - 2026-10-03
 
 ### Changed
