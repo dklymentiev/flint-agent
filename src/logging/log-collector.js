@@ -13,6 +13,7 @@ import path from "node:path";
 import { config } from "../config.js";
 import { createLogger } from "./logger.js";
 import { cleanup as busCleanupFn } from "../bus/index.js";
+import { homeStateDir, installStateDir } from "../data-dir.js";
 
 const log = createLogger("collector");
 
@@ -78,9 +79,9 @@ function cleanDirectory(dir) {
 }
 
 async function cleanRegistry() {
-  const { homedir } = await import("node:os");
+  const { homeStateDir } = await import("../data-dir.js");
   const { join } = await import("node:path");
-  const registryFile = join(homedir(), ".flint", "agents.json");
+  const registryFile = join(homeStateDir(), "agents.json");
 
   if (!existsSync(registryFile)) return 0;
 
@@ -115,8 +116,8 @@ function runCollector() {
   // Clean main sessions directory
   const main = cleanDirectory(config.sessionsDir);
 
-  // Clean children sessions directory
-  const childrenDir = path.join(config.projectRoot, "sessions", "children");
+  // Clean children sessions directory (for parent/AGENT_PARENT_PORT spawns)
+  const childrenDir = path.join(installStateDir(), "sessions", "children");
   const children = cleanDirectory(childrenDir);
 
   // Clean stale registry entries

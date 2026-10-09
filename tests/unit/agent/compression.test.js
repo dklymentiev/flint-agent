@@ -150,3 +150,27 @@ describe("image message compression", () => {
     expect(messages[0].content).toContain("Image from desktop_screenshot");
   });
 });
+
+// The threshold was checked against chars/4 of the messages alone, which leaves
+// out the system prompt and tool schemas (about 18K per call in a real session)
+// and undercounts code and non-English text. A 1572-call session ran 784 calls
+// above the 128K normal-level cap. The provider's own prompt_tokens from the
+// last call is the honest size of what is being sent, so it counts too.
+describe("threshold uses the provider's real prompt size", () => {
+  const build = () => ([
+    { role: "tool", tool_call_id: "1", content: Array.from({ length: 20 }, (_, i) => `line ${i} ${"x".repeat(30)}`).join(String.fromCharCode(10)), _toolName: "read_file", _toolArgs: { path: "f.txt" } },
+    { role: "user", content: "next" },
+  ]);
+
+  it("compresses when the real prompt is over the threshold though the messages look small", async () => {
+    const messages = build();
+    await compressContext(messages, 0, 1, null, { contextTokens: 200000 });
+    expect(messages[0]._compressed).toBeTruthy();
+  });
+
+  it("does not compress when both the estimate and the real prompt are under the threshold", async () => {
+    const messages = build();
+    await compressContext(messages, 0, 1, null, { contextTokens: 5000 });
+    expect(messages[0]._compressed).toBeFalsy();
+  });
+});

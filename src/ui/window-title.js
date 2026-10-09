@@ -14,13 +14,15 @@
 // turn-end cost line at the end of a turn is not wiped by the next tick.
 
 import { defaultSetTitle } from "./prompt-attention.js";
+import { fitWidth } from "./title-width.js";
 
 /**
  * Spinner frames: a gear and a spark, alternating (owner, 2026-10-02). The
  * title bar is drawn in the system UI font, which has both; the console keeps
  * braille dots, because several monospace fonts lack these two. The classic
  * "|/-\" set reads as a blinking cursor at title-bar size, which looks like a
- * crash.
+ * crash. Do not replace these frames: they are the owner's choice. The title
+ * has a fixed character count (title-width.js) so its width stays steady.
  */
 export const TITLE_FRAMES = ["⛭", "✲"];
 
@@ -86,7 +88,9 @@ export function startAliveTitle({ setTitle = writeTitle, isTTY = process.stdout.
     }
   };
 
-  const current = () => `${TITLE_FRAMES[frame]} ${IDLE_TITLE}`;
+  let task = "";
+  // Fixed-width: frame, name, then the current task cut or padded to a set size.
+  const current = () => fitWidth(`${TITLE_FRAMES[frame]} Flint agent - ${task || "working"}`);
 
   const tick = () => {
     if (held !== null) return;
@@ -118,7 +122,12 @@ export function startAliveTitle({ setTitle = writeTitle, isTTY = process.stdout.
      */
     hold(title) {
       held = typeof title === "string" ? title : null;
-      if (held !== null) write(held);
+      if (held !== null) write(held = fitWidth(held));
+    },
+
+    /** What Flint is doing now (first words of the request, or a tool name). */
+    setTask(text) {
+      task = typeof text === "string" ? text.trim().replace(/\s+/g, " ") : "";
     },
 
     /** Give the held title back to the animation. */
@@ -143,7 +152,7 @@ export function startAliveTitle({ setTitle = writeTitle, isTTY = process.stdout.
       // Written while `running` is still true, because write() refuses to emit
       // once it is false. A stop that leaves the spinner in the title bar is a
       // stopped Flint that still looks busy — which is what this is avoiding.
-      write(held !== null ? held : IDLE_TITLE);
+      write(held !== null ? held : fitWidth(IDLE_TITLE));
       running = false;
     },
   };

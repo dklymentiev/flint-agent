@@ -8,8 +8,8 @@
 // $10), which an agent turn of 6-150 calls uses up fast.
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { homedir } from "node:os";
 import path from "node:path";
+import { homeStateDir } from "./data-dir.js";
 
 export const OPENROUTER_API = "https://openrouter.ai/api/v1";
 const AVAILABLE_UPTIME = 90;
@@ -102,8 +102,7 @@ export function dailyFreeLimit(keyInfo) {
 // ── Saved state: the chain and today's count ───────────────
 
 function stateFile() {
-  const dir = process.env.FLINT_DATA_DIR ? path.resolve(process.env.FLINT_DATA_DIR) : path.join(homedir(), ".flint");
-  return path.join(dir, "free.json");
+  return path.join(homeStateDir(), "free.json");
 }
 function readState() {
   try { return existsSync(stateFile()) ? JSON.parse(readFileSync(stateFile(), "utf8")) : {}; } catch { return {}; }

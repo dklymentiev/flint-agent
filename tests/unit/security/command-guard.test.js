@@ -312,4 +312,93 @@ describe("command-guard", () => {
       });
     }
   });
+
+  describe("git stash hard-deny", () => {
+    // git stash is shared across all worktrees of a repository. A bare
+    // `git stash` (no -C, no path) in one worktree pulls another worktree's
+    // stash out and writes it into the running checkout — overwriting files
+    // the operator did not mean to touch. The guard blocks every form of
+    // stash invocation and names the safe alternatives.
+    const stashCommands = [
+      { cmd: "git stash", desc: "bare git stash" },
+      { cmd: "git stash save", desc: "git stash save" },
+      { cmd: "git stash save -u", desc: "git stash save -u" },
+      { cmd: "git stash push", desc: "git stash push" },
+      { cmd: "git stash pop", desc: "git stash pop" },
+      { cmd: "git stash apply", desc: "git stash apply" },
+      { cmd: "git stash list", desc: "git stash list" },
+      { cmd: "git stash drop", desc: "git stash drop" },
+      { cmd: "git stash branch new-branch", desc: "git stash branch" },
+      { cmd: "git stash show", desc: "git stash show" },
+    ];
+
+    for (const { cmd, desc } of stashCommands) {
+      it(`blocks: ${desc}`, () => {
+        const result = hook("run_command", { command: cmd });
+        expect(result).toBeTruthy();
+        expect(result.deny).toBe(true);
+        expect(result.reason).toContain("git stash");
+      });
+    }
+
+    it("blocks: git -C with stash subcommand", () => {
+      const result = hook("run_command", { command: "git -C /c/xxx stash pop" });
+      expect(result).toBeTruthy();
+      expect(result.deny).toBe(true);
+      expect(result.reason).toContain("git stash");
+    });
+
+    it("blocks: git --no-pager with stash subcommand", () => {
+      const result = hook("run_command", { command: "git --no-pager stash" });
+      expect(result).toBeTruthy();
+      expect(result.deny).toBe(true);
+      expect(result.reason).toContain("git stash");
+    });
+
+    it("blocks: git stash with global -C and --no-pager", () => {
+      const result = hook("run_command", { command: "git -C /repo --no-pager stash save -u" });
+      expect(result).toBeTruthy();
+      expect(result.deny).toBe(true);
+    });
+
+    // The guard collapses whitespace (newlines included) before matching, so
+    // "stash" must be the subcommand itself, not any word after "git".
+    const notStash = [
+      "git status\ncat stash.txt",
+      "git add src/stash.js",
+      "git branch stash-fix",
+      "git log -- stash/",
+      "git commit -m wip && cat notes-stash.md",
+      "git diff stash.js",
+    ];
+    for (const cmd of notStash) {
+      it(`allows: ${JSON.stringify(cmd)}`, () => {
+        expect(hook("run_command", { command: cmd })).toBeNull();
+      });
+    }
+
+    it("still blocks the subcommand after quoted and chained global options", () => {
+      for (const cmd of [
+        'git -C "/my repo" stash pop',
+        "git -c core.pager=cat stash list",
+        "git --git-dir=/x/.git --work-tree=/x stash",
+        "git --git-dir /x/.git stash",
+        "echo ok; git stash",
+        "git status && git stash push",
+      ]) {
+        const r = hook("run_command", { command: cmd });
+        expect(r?.deny, cmd).toBe(true);
+      }
+    });
+
+    it("still allows: git stash in a comment", () => {
+      const result = hook("run_command", { command: "echo safe # git stash" });
+      expect(result).toBeNull();
+    });
+
+    it("still allows: grep for 'git stash'", () => {
+      const result = hook("run_command", { command: "grep 'git stash' docs" });
+      expect(result).toBeNull();
+    });
+  });
 });

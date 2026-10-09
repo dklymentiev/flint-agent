@@ -20,6 +20,9 @@ vi.mock("../../src/logging/logger.js", () => ({
 }));
 
 // Mock homedir so PLUGINS_DIR resolves under our temp directory
+// Note: pluginsDir() now resolves through dataDir(), which checks FLINT_DATA_DIR
+// first. The test sets FLINT_PLUGINS_DIR to control the plugins location, which
+// is the supported override for tests.
 vi.mock("node:os", async () => {
   const actual = await vi.importActual("node:os");
   return {
@@ -28,15 +31,18 @@ vi.mock("node:os", async () => {
   };
 });
 
-// Import AFTER the mock — loader.js computes PLUGINS_DIR from homedir() at import time
+// Import AFTER the mock — loader.js computes PLUGINS_DIR from homeDir() at import time
 TEMP_PLUGINS_DIR = mkdtempSync(join(tmpdir(), "flint-plugin-test-"));
+const pluginsSubDir = join(TEMP_PLUGINS_DIR, ".flint", "plugins");
+mkdirSync(pluginsSubDir, { recursive: true });
+// pluginsDir() checks FLINT_PLUGINS_DIR first; set it so the test controls
+// the plugins location regardless of FLINT_DATA_DIR / homedir().
+process.env.FLINT_PLUGINS_DIR = pluginsSubDir;
 
 const { loadPlugins, listInstalledPlugins, getPluginsDir, ensurePluginsDir } =
   await import("../../src/plugins/loader.js");
 const { installPlugin, uninstallPlugin } = await import("../../src/plugins/manager.js");
 const registry = await import("../../src/tools/registry.js");
-
-const pluginsSubDir = join(TEMP_PLUGINS_DIR, ".flint", "plugins");
 
 // --- Helpers ---
 

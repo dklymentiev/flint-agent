@@ -66,6 +66,16 @@ export function CarefulMenu({ onSelect, onCancel, initialIndex = DEFAULT_INDEX }
   const [done, setDone] = React.useState(false);
   const options = levelOptions();
 
+  // Ref mirrors the latest index so the useInput callback always reads the
+  // current value. ink's useInput registers its handler via useEffect, which
+  // fires after the render commits — not synchronously within batchedUpdates.
+  // A keystroke that arrives before that effect runs (e.g. Enter right after
+  // arrow-down in a test) would still read the stale closure value from the
+  // previous render, picking the wrong option. The ref is updated during
+  // render, so it is current by the time any deferred input event arrives.
+  const indexRef = React.useRef(index);
+  indexRef.current = index;
+
   const choose = (i) => {
     if (done) return;
     // Latched before the callback: a key held down, or a key and an Enter in
@@ -76,7 +86,7 @@ export function CarefulMenu({ onSelect, onCancel, initialIndex = DEFAULT_INDEX }
 
   useInput((ch, key) => {
     if (done) return;
-    const action = keyAction(ch, key, index, options.length);
+    const action = keyAction(ch, key, indexRef.current, options.length);
     if (action === "up") {
       setIndex((i) => Math.max(0, i - 1));
       return;
@@ -91,7 +101,7 @@ export function CarefulMenu({ onSelect, onCancel, initialIndex = DEFAULT_INDEX }
       return;
     }
     if (action === "select") {
-      choose(index);
+      choose(indexRef.current);
       return;
     }
     // A level name or its letter came through.

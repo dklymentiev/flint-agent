@@ -1,6 +1,6 @@
 # Flint Agent -- Technical Reference
 
-**Version:** 1.14.5
+**Version:** 1.14.6
 **Checked against the code:** 2026-10-03
 **Source:** The main exported functions, tools, endpoints, commands and config options in `src/`
 
@@ -88,8 +88,8 @@ Central configuration object. Reads from CLI args, env vars, persisted provider 
 | `maxDisplayLines` | number | `1000` | `AGENT_MAX_LINES` | Max lines in TUI output buffer |
 | `maxResponseLines` | number | `500` | `AGENT_MAX_RESPONSE_LINES` | Max lines in agent response display |
 | `mcpServers` | string\|null | `null` | `MCP_SERVERS` | Comma-separated MCP server configs |
-| `maxIterations` | number | `150` | `AGENT_MAX_ITERATIONS` | Max agent loop iterations per message |
-| `maxCostPerAction` | number | `0` | `AGENT_MAX_COST` | Per-action cost budget in $ (0=unlimited) |
+| `maxIterations` | number | `500` | `AGENT_MAX_ITERATIONS` | Max agent loop iterations per message |
+| `maxCostPerAction` | number | `5` | `AGENT_MAX_COST` | Per-action cost budget in $ (default 5; 0=unlimited, set explicitly) |
 | `sessionBudget` | number | `0` | `AGENT_SESSION_BUDGET` | Session-level $ limit (0=unlimited) |
 | `compressAfterTokens` | number\|null | `null` | `COMPRESS_AFTER_TOKENS` | Token threshold for context compression. Unset: derived from the model's window and the spend mode (see `src/agent/compression.js`) |
 | `headless` | boolean | `false` | -- | Set by `--headless` and stdio mode (no console) |
@@ -111,7 +111,7 @@ Central configuration object. Reads from CLI args, env vars, persisted provider 
 | `shell` | string | auto-detect | `AGENT_SHELL` | Shell for run_command (Git Bash on Windows) |
 | `maxBatchFiles` | number | `20` | `AGENT_MAX_BATCH_FILES` | Max files per write_file batch |
 | `securityPolicy` | string | `"normal"` | `AGENT_SECURITY_POLICY` | Security profile: strict/normal/permissive |
-| `extractionModel` | string | `"google/gemini-2.0-flash-001"` | `EXTRACTION_MODEL` | Cheap model for fact extraction |
+| `extractionModel` | string | the active model | `EXTRACTION_MODEL` | Model for fact extraction; follows the active provider/model unless overridden |
 | `compressThreshold` | number | `500` | `COMPRESS_THRESHOLD` | Char threshold for head/tail compression |
 | `maxContextChars` | number | `20000` | `MAX_CONTEXT_CHARS` | Max chars for FLINT.md context injection |
 | `maxPromptTokens` | number | `100000` | `MAX_PROMPT_TOKENS` | Budget for the system prompt sections (`src/agent/prompt-budget.js`) |
@@ -912,7 +912,7 @@ Starts an HTTP server on 127.0.0.1 with auto-port scanning (tries up to 20 ports
 |---|---|---|
 | `POST` | `/pair/request` | Initiate PIN-based pairing |
 | `POST` | `/pair/confirm` | Verify PIN, receive bearer token |
-| `POST` | `/message` | Send message to agent. Body: `{ content, name?, sync?, stream?, autonomous? }`. Default: async, answers 202 with a `messageId`. `?sync=true` waits for the result (180 s); `?stream=true` answers with Server-Sent Events (`src/api/stream-pipe.js`). A slash command in `content` runs at once and returns its output |
+| `POST` | `/message` | Send message to agent. Body: `{ content, name?, sync?, stream?, autonomous?, self_continue? }`. Default: async, answers 202 with a `messageId`. `?sync=true` waits for the result (180 s); `?stream=true` answers with Server-Sent Events (`src/api/stream-pipe.js`). A slash command in `content` runs at once and returns its output. `autonomous: true` enables autonomous mode (auto-approves tools, enables self-verify). `self_continue: true` opts in to self-continue: when the agent creates a plan with pending tasks, it will keep working through them in subsequent turns. Without `self_continue`, an API message stops after a single turn even if the plan has unfinished tasks. (See `src/agent/flow-controller.js` `shouldContinue`.) |
 | `GET` | `/message/:id` | Poll for async message result (status, response, stats, `stop_reason`, tool calls) |
 | `GET` | `/status` | Session info (model, message count, alive, session usage and cost) |
 | `POST` | `/restart` | Save the session and restart, continuing it |

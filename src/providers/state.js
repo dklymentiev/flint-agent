@@ -2,10 +2,10 @@
 // File: ~/.flint/provider.json
 
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
-import { homedir } from "node:os";
 import path from "node:path";
+import { homeStateDir } from "../data-dir.js";
 
-const FLINT_DIR = path.join(homedir(), ".flint");
+const FLINT_DIR = homeStateDir();
 const STATE_FILE = path.join(FLINT_DIR, "provider.json");
 
 const DEFAULT_STATE = {

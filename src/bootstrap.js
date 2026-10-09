@@ -10,12 +10,14 @@ import { setPluginContext } from "./tools/plugin-tools.js";
 import { getSandboxMode } from "./sandbox/backend.js";
 import { initPermissions, askOnboardingIfNeeded, getOnboardingState, getConfirmTimeoutMs } from "./tools/permissions.js";
 import { whileWaitingForOperator } from "./startup-watchdog.js";
+import { prepareHeadless } from "./headless-start.js";
 import { initSecurity } from "./security/index.js";
 import { initCommands } from "./commands/registry.js";
 import { getSystemMessage } from "./agent/system-prompt.js";
 import { fetchModelInfo } from "./api/client.js";
 import { initLogger, createLogger } from "./logging/logger.js";
 import { loadProfile } from "./profiles.js";
+import { stdinIsRealTTY } from "./tty.js";
 import { createTaskTools, formatPlanForPrompt } from "./tools/tasks.js";
 // schedule-tools.js removed — reminders are now add_task with next_run/repeat
 import { createInboxTools, handleInboxTool } from "./tools/inbox-tools.js";
@@ -26,12 +28,18 @@ import {
   generateSessionId,
   saveSession,
   loadSession,
+  quarantineSession,
   listSessions,
+  acquireSessionLock,
+  releaseSessionLock,
 } from "./sessions.js";
 import { initOutput, printWarning } from "./ui/output.js";
 import { formatToolArgsFull } from "./ui/header.js";
 import { approvalArgLines, approvalFitsLive } from "./components/LiveZone.js";
 import { promptAttentionStart, promptAttentionStop } from "./ui/prompt-attention.js";
+
+// How often the MCP health check looks; the backoff itself is in mcp-client.js.
+const MCP_HEALTH_TICK_MS = 10_000;
 
 export function buildSystemMessage(profileName, sessionId) {
   app.profileConfig = loadProfile(profileName);
@@ -152,7 +160,15 @@ function initStore() {
  * level nobody chose is never written on their behalf.
  */
 export async function initOnboarding() {
-  if (!process.stdin.isTTY) return;
+  // A --headless run has nobody to answer. Under sudo the process may still
+  // hold a pseudoterminal, so the isTTY check below is not enough: the menu
+  // was drawn, the watchdog countdown was lifted by whileWaitingForOperator,
+  // and the run waited for a key that nobody could press. Ask only
+  // when a person is actually there.
+  if (config.headless) return;
+  // Not process.stdin.isTTY alone: index.js fakes that for ink when stdin is a
+  // pipe or /dev/null, and the menu then waited for keys that could not come.
+  if (!stdinIsRealTTY()) return;
   // Asked on the very first run only. See the note above.
   if (getOnboardingState().asked) return;
   // No startup countdown while the operator reads the question.
@@ -256,7 +272,7 @@ function initMcp() {
   // Connect in background — TUI already visible
   (async () => {
     try {
-      const { connectMcpServers, disconnectServer, reconnectServer, getServerStatus } = await import("./mcp-client.js");
+      const { connectMcpServers, disconnectServer, reconnectServer, getServerStatus, autoReconnectTick } = await import("./mcp-client.js");
       const { tools: mcpTools, handlers: mcpHandlers, results } = await connectMcpServers(config.mcpServers);
       registerMcpTools(mcpTools, mcpHandlers, results);
       app.mcpStatusList = results;
@@ -276,27 +292,26 @@ function initMcp() {
         }
       }
 
-      // MCP health check + auto-reconnect (every 60s)
+      // MCP health check + auto-reconnect. The ticks are short so that a
+      // backoff delay is kept to within a few seconds; what is retried, when,
+      // and what is given up on is decided in mcp-client.js autoReconnectTick.
       const mcpHealthInterval = setInterval(async () => {
         try {
-          const statuses = getServerStatus(config.mcpServers);
-          for (const s of statuses) {
-            if (!s.connected) {
-              store.getState().addLine(chalk.yellow(`  mcp: ${s.name} disconnected — reconnecting...`));
-              try {
-                const result = await reconnectServer(s.name, config.mcpServers);
-                if (result.ok) {
-                  registerMcpTools(result.tools ? [result] : [], result.handlers || {}, [result]);
-                  app.systemMessage = buildSystemMessage(app.activeProfile);
-                  store.getState().addLine(chalk.green(`  mcp: ${s.name} reconnected (${result.tools || 0} tools)`));
-                }
-              } catch (e) {
-                store.getState().addLine(chalk.yellow(`  mcp: ${s.name} reconnect failed: ${e.message}`));
-              }
+          const events = await autoReconnectTick(config.mcpServers);
+          for (const ev of events) {
+            if (ev.type === "connected") {
+              const result = ev.result;
+              registerMcpTools(result.tools ? [result] : [], result.handlers || {}, [result]);
+              app.systemMessage = buildSystemMessage(app.activeProfile);
+              store.getState().addLine(chalk.green(`  mcp: ${ev.name} reconnected (${result.toolCount || 0} tools)`));
+            } else if (ev.type === "fatal") {
+              store.getState().addLine(chalk.red(`  mcp: ${ev.name} cannot connect until its configuration is fixed, not retrying: ${ev.error}`));
+            } else if (ev.type === "backoff") {
+              store.getState().addLine(chalk.yellow(`  mcp: ${ev.name} reconnect failed: ${ev.error} (next try in ${Math.round(ev.delayMs / 1000)}s or later)`));
             }
           }
         } catch {}
-      }, 60000);
+      }, MCP_HEALTH_TICK_MS);
       mcpHealthInterval.unref(); // don't prevent process exit
     } catch (err) {
       app.mcpStatusList = [{ name: "mcp", tools: 0, ok: false, error: err.message }];
@@ -353,7 +368,18 @@ async function initSession(cli, explicitProfile) {
   }
 
   async function restoreSession(sessionId) {
-    const data = await loadSession(sessionId);
+    let data;
+    try {
+      data = await loadSession(sessionId);
+    } catch (err) {
+      if (err.code === "SESSION_CORRUPT") {
+        // Keep what is on disk: a caller that starts an empty session under
+        // this id would otherwise overwrite the only copy on its first save.
+        const kept = await quarantineSession(sessionId);
+        process.stderr.write(`[flint] ${err.message}. Kept as ${kept}; starting without it.\n`);
+      }
+      throw err;
+    }
     if (data.messages?.[0]?.role === "system") {
       data.messages[0] = app.systemMessage;
     }
@@ -380,15 +406,58 @@ async function initSession(cli, explicitProfile) {
 
   if (cli.action === "last") {
     const sessions = await listSessions();
-    if (sessions.length) await restoreSession(sessions[0].id);
+    // The newest session that can be read. A damaged file (a half-written
+    // save, a hand edit) used to throw out of bootstrap as a bare stack trace;
+    // it is skipped with one line, and with none readable Flint starts fresh.
+    for (const s of sessions) {
+      try {
+        await restoreSession(s.id);
+        break;
+      } catch (err) {
+        console.error(chalk.yellow(`Session "${s.id}" could not be read (${err.message}); skipped.`));
+      }
+    }
   }
 
   if (cli.action === "resume") {
     try {
       await restoreSession(cli.id);
-    } catch {
-      console.error(chalk.red(`Session "${cli.id}" not found.`));
+    } catch (err) {
+      console.error(chalk.red(err?.code === "SESSION_CORRUPT"
+        ? `Session "${cli.id}" is corrupt; the file was kept as .corrupt.`
+        : err?.code === "ENOENT"
+          ? `Session "${cli.id}" not found.`
+          : `Session "${cli.id}" could not be read: ${err.message}`));
       process.exit(1);
+    }
+  }
+
+  // Headless can resume a session by --session <id>. The flag is parsed in
+  // cli.js for the headless branch; cli.id is set only when the operator asked
+  // for it. The lock is taken on cli.id BEFORE restore, so two headless runs
+  // that name the same id contend on the same lock instead of each generating
+  // a fallback timestamp id and never meeting. An existing session is
+  // continued, a missing one is started fresh (a headless run naming an
+  // unknown id is not fatal — it creates it).
+  if (cli.action === "headless" && cli.id) {
+    try {
+      await acquireSessionLock(cli.id);
+      app.lockOwned = true;
+    } catch (err) {
+      if (config.headless) {
+        process.stderr.write("[headless] " + err.message + "\n");
+        process.exit(1);
+      }
+      console.error(chalk.red(err.message));
+    }
+    try {
+      await restoreSession(cli.id);
+    } catch {
+      // Unknown session: fall through to the new-session branch below, but
+      // keep the lock we just took on cli.id — the new-session branch will
+      // set the store session id to cli.id so the lock matches the file.
+      store.getState().setSession(cli.id, [app.systemMessage], []);
+      store.getState().setProfile(app.activeProfile);
     }
   }
 
@@ -421,6 +490,28 @@ async function initSession(cli, explicitProfile) {
     }).catch(() => {});
   }
 
+  // Acquire an exclusive lock on the session. Two processes targeting the
+  // same id would otherwise both write <id>.json and silently clobber each
+  // other's history (the ids from generateSessionId are second-precision
+  // timestamps, so a parallel pair collides by design). A live holder refuses
+  // the second writer; a dead holder's lock is recovered.
+  //
+  // Headless + --session already locked and set its id above, so skip the
+  // generic lock here to avoid acquiring a second lock file on a different
+  // path.
+  const sessionIdToLock = store.getState().sessionId;
+  if (!(cli.action === "headless" && cli.id)) {
+    try {
+      await acquireSessionLock(sessionIdToLock);
+    } catch (err) {
+      if (config.headless) {
+        process.stderr.write("[headless] " + err.message + "\n");
+        process.exit(1);
+      }
+      console.error(chalk.red(err.message));
+    }
+  }
+
   store.getState().setModel(config.model);
   store.getState().setProvider(config.provider);
 
@@ -431,6 +522,10 @@ async function initWorkspace() {
   const sessionId = store.getState().sessionId;
   if (config.workdirBase) {
     config.workdir = config.workdirBase;
+  } else if (config.workdir) {
+    // Already set by enterCwd() for --headless --cwd: keep the task repo as
+    // the write target so write_file / edit_file land there.
+    // initWorkspace must not clobber this. See headless-start.js:enterCwd.
   } else {
     config.workdir = (await import("node:path")).default.join(config.sessionsDir, sessionId, "workspace");
   }
@@ -448,6 +543,26 @@ export async function bootstrap(cli, pkg) {
   const _t = (label) => _bootTimes.push([label, performance.now()]);
 
   _t("start");
+  // First, before anything asks or reads the working directory. index.js has
+  // already done this; it is repeated here so that the order is a property of
+  // bootstrap() itself: initOnboarding() below must see the headless flag, and
+  // initSystemMessage() must print --cwd, not the directory Flint is installed
+  // in. Idempotent, and a no-op unless the run is headless.
+  prepareHeadless(cli);
+  // Headless mode: the host's instructions and local MCP config, the same way
+  // stdio mode gets them. Without this, a headless launch cannot override its
+  // identity (--system-prompt) or load servers from .mcp.json in --cwd: the
+  // hostPromptFrom/mcpConfigPath calls lived only in index.js's stdio branch,
+  // so bootstrap() called directly by tests or embedded callers never saw them.
+  // An instructions file that is not there or a .mcp.json that is not JSON ends
+  // the launch with one line and exit code 2, as it does in stdio mode
+  // (launch-identity.js), not with a stack trace out of bootstrap().
+  if (cli.action === "headless") {
+    const { launchIdentityOrExit } = await import("./launch-identity.js");
+    const identity = launchIdentityOrExit(cli, config.mcpServers);
+    app.hostPrompt = identity.hostPrompt;
+    config.mcpServers = identity.mcpServers;
+  }
   const explicitProfile = initProfile();
   _t("initProfile");
   // Before initStore, and that ordering is the entire point.

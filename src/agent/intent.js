@@ -15,9 +15,9 @@ import { getSpendLevel, spendSettings } from "../spend.js";
 import { createHash } from "node:crypto";
 import { intentTimeoutMs } from "./intent-timeout.js";
 import { appendFileSync, mkdirSync, statSync, renameSync, existsSync, readFileSync } from "node:fs";
-import { homedir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+import { homeStateDir } from "../data-dir.js";
 import { config } from "../config.js";
 import { createLogger } from "../logging/logger.js";
 import { INTENTS, formatIntentCatalog, resolveIntent } from "./intent-manifest.js";
@@ -120,7 +120,7 @@ function looksLikeInjection(text) {
 // ── Shadow log of classification decisions ──
 // Every classification is appended so we can later measure accuracy against
 // E2E outcomes. No runtime cost beyond one async-fs append.
-const DECISIONS_FILE = join(homedir(), ".flint", "intent-decisions.jsonl");
+const DECISIONS_FILE = join(homeStateDir(), "intent-decisions.jsonl");
 const DECISIONS_MAX_BYTES = 10 * 1024 * 1024; // 10 MB → archive + start fresh
 let _logCallCount = 0;
 
@@ -145,7 +145,7 @@ function maybeRotateDecisions() {
 
 function logDecision(entry) {
   try {
-    mkdirSync(join(homedir(), ".flint"), { recursive: true });
+    mkdirSync(dirname(DECISIONS_FILE), { recursive: true });
     // Gate the size check to avoid a statSync on every classification; once
     // per 100 decisions is enough (max 100 extra log lines before rotation).
     if (_logCallCount++ % 100 === 0) maybeRotateDecisions();
@@ -332,7 +332,7 @@ export async function classifyIntent(ctx) {
   if (process.env.FLINT_DUMP_CLASSIFIER_PROMPT === "1") {
     try {
       const { writeFileSync, mkdirSync, existsSync: exists } = await import("node:fs");
-      const dir = join(homedir(), ".flint", "classifier-prompt-snapshots");
+      const dir = join(homeStateDir(), "classifier-prompt-snapshots");
       if (!exists(dir)) mkdirSync(dir, { recursive: true });
       const ts = Date.now();
       writeFileSync(join(dir, `${ts}.json`), JSON.stringify({

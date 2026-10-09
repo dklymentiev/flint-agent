@@ -13,9 +13,11 @@ export const app = {
   securityApi: null,
   inkInstance: null,
   shuttingDown: false,
+  timeLimitHit: false, // set true by the headless time-limit timer on fire
   lockChain: Promise.resolve(),
   queueAborted: false,
-  autonomous: false, // autonomous mode: self-continue when plan has pending tasks
+  autonomous: false, // TUI /auto only — NOT touched by API messages
+  apiSelfContinue: false, // per-message API opt-in, set from body.autonomous
   apiGoalId: null, // goal ID created by current API task — stop when this goal completes
 };
 

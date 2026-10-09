@@ -94,6 +94,30 @@ describe("shouldContinue", () => {
     expect(r.action).toBe("continue");
     expect(r.prompt).toContain("retries");
   });
+
+  // API self-continue is opt-in: an API message that creates a plan with
+  // pending tasks does not keep going on its own. The caller must set
+  // `self_continue: true` (which sets app.autonomous) to enable it.
+  it("API scope + pending plan + no self-continue = stop", () => {
+    const plan = { goalId: 1, tasks: [{ id: 1, title: "test", status: "pending" }] };
+    const r = shouldContinue({ stopReason: "done", plan, isApiScoped: true, apiGoalId: 1, apiSelfContinue: false });
+    expect(r.action).toBe("stop");
+    expect(r.reason).toBe("api_self_continue_not_enabled");
+  });
+
+  it("API scope + pending plan + self-continue opt-in = continue", () => {
+    const plan = { goalId: 1, tasks: [{ id: 1, title: "test", status: "pending" }] };
+    const r = shouldContinue({ stopReason: "done", plan, isApiScoped: true, apiGoalId: 1, apiSelfContinue: true });
+    expect(r.action).toBe("continue");
+    expect(r.prompt).toContain("test");
+  });
+
+  it("TUI auto (isApiScoped=false) + pending plan = continue regardless", () => {
+    const plan = { goalId: 1, tasks: [{ id: 1, title: "test", status: "pending" }] };
+    const r = shouldContinue({ stopReason: "done", plan, isApiScoped: false, apiGoalId: null, apiSelfContinue: false });
+    expect(r.action).toBe("continue");
+    expect(r.prompt).toContain("test");
+  });
 });
 
 describe("isLearningOpportunity", () => {

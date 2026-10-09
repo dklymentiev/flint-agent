@@ -1,14 +1,31 @@
 // The stream-json protocol of the stdio mode: one JSON object per line on
-// stdin and on stdout, in the common stream-json shapes, so a host written for
-// `claude --input-format stream-json --output-format stream-json` reads Flint
-// without changes. A host driving it reads:
+// stdin and on stdout. The lines a host written for
+// `claude --input-format stream-json --output-format stream-json` knows keep
+// the common stream-json shapes:
 //
-//   assistant  message.content[] text and tool_use blocks, message.usage, message.id
-//   result     subtype ("success" or an error), result, usage, total_cost_usd
-//   error      message (a turn that could not run at all)
+//   system (init)         session_id, model, cwd, tools, mcp_servers, permissionMode
+//   assistant             message.content[] text and tool_use blocks, message.usage, message.id
+//   user (tool_result)    tool_use_id, content, is_error
+//   result                subtype, result, usage, total_cost_usd, stop_reason
+//   control_response      the answer to a control_request
 //
-// and writes `user` messages and `control_request` interrupts. Everything else
-// (system init, tool results, control responses) is for other hosts and logs.
+// Flint adds to that, and this is NOT part of the claude stream-json format:
+//
+//   tool_start            tool_use_id, tool_name, args: a tool begins
+//   text                  text: one streamed chunk of the reply, thinking left
+//                         out; the same text comes again, whole, in `assistant`
+//   text_delta            delta: visible prose before the assistant snapshot
+//   steer_status          request_id, status "delivered" | "too_late" (after the
+//                         control_response that said "accepted")
+//   on the tool_result line, beside `message`: tool_name, args, duration_ms
+//   on the result line: truncated_at, provider_error
+//
+// So a host has to skip a line whose `type` it does not know and ignore fields
+// it does not know; one that rejects them cannot read Flint as it is. The node
+// host reads the added types (tests/integration/stdio-event-stream.test.js,
+// docs/findings/stdio-event-stream.md), which is why they are always on.
+//
+// A host writes `user` messages and `control_request` interrupts or steers.
 //
 // Pure functions only; the loop that uses them is stdio/run.js.
 
@@ -113,7 +130,7 @@ export function assistantEvent({ reply, usage, model, sessionId, messageId }) {
   };
 }
 
-export function toolResultEvent({ toolUseId, result, isError, sessionId }) {
+export function toolResultEvent({ toolUseId, result, isError, sessionId, toolName, args, durationMs }) {
   let text = typeof result === "string" ? result : JSON.stringify(result);
   if (text == null) text = "";
   if (text.length > TOOL_RESULT_MAX_CHARS) {
@@ -124,6 +141,9 @@ export function toolResultEvent({ toolUseId, result, isError, sessionId }) {
     message: { role: "user", content: [{ type: "tool_result", tool_use_id: toolUseId, content: text, is_error: !!isError }] },
     parent_tool_use_id: null,
     session_id: sessionId,
+    tool_name: toolName || null,
+    args: args || {},
+    duration_ms: durationMs || 0,
   };
 }
 
@@ -131,7 +151,7 @@ export function toolResultEvent({ toolUseId, result, isError, sessionId }) {
  * The end of a turn. `subtype` is "success", "error_during_execution" (the
  * turn failed or was interrupted) or "error_max_turns" (the step limit).
  */
-export function resultEvent({ subtype, text, sessionId, durationMs, numTurns, costUsd, promptTokens, completionTokens, stopReason }) {
+export function resultEvent({ subtype, text, sessionId, durationMs, numTurns, costUsd, promptTokens, completionTokens, stopReason, truncatedAt, providerError }) {
   return {
     type: "result",
     subtype,
@@ -143,6 +163,43 @@ export function resultEvent({ subtype, text, sessionId, durationMs, numTurns, co
     total_cost_usd: costUsd || 0,
     usage: { input_tokens: promptTokens || 0, output_tokens: completionTokens || 0 },
     stop_reason: stopReason || null,
+    // Structured marker for a turn cut by the step ceiling (max_iterations).
+    // null on a normal completion so hosts don't have to distinguish key
+    // presence from absence.
+    truncated_at: truncatedAt || null,
+    // The provider's definite verdict on this turn ({ status, kind }, kind
+    // "model-not-found" or "auth"), else null. Structured, so a host never has
+    // to read it out of the text or the stderr.
+    provider_error: providerError || null,
+  };
+}
+
+/**
+ * A tool started. The stream-json host needs to know immediately when a tool
+ * begins, not only when its result arrives, so it can mark the turn active
+ * and show what is running. Carries the call's id (the id of its tool_use
+ * block and of its tool_result; null when the call has none), the tool name
+ * and its arguments; duration_ms and result come in the matching tool_result.
+ */
+export function toolStartEvent({ toolUseId, toolName, args, sessionId }) {
+  return {
+    type: "tool_start",
+    tool_use_id: toolUseId || null,
+    tool_name: toolName,
+    args: args || {},
+    session_id: sessionId,
+  };
+}
+
+/**
+ * A chunk of streamed model output. Emitted for every token the model
+ * produces, so a host does not have to wait for the assembled reply.
+ */
+export function textEvent({ text, sessionId }) {
+  return {
+    type: "text",
+    text: text || "",
+    session_id: sessionId,
   };
 }
 
@@ -152,6 +209,14 @@ export function controlResponse(requestId, extra = {}) {
 
 export function controlError(requestId, error) {
   return { type: "control_response", response: { subtype: "error", request_id: requestId, error } };
+}
+
+export function steerStatus(requestId, status, sessionId) {
+  return { type: "steer_status", request_id: requestId, status, session_id: sessionId };
+}
+
+export function textDelta(delta, sessionId) {
+  return { type: "text_delta", delta, session_id: sessionId };
 }
 
 /**

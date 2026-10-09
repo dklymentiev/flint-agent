@@ -7,8 +7,45 @@ import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import {
   parseInputLine, userContent, assistantEvent, toolResultEvent,
-  resultEvent, resultSubtype, controlResponse,
+  resultEvent, resultSubtype, controlResponse, controlError, steerStatus, textDelta, toolStartEvent, textEvent,
 } from "./protocol.js";
+
+// Do not expose <thinking> blocks to the host. Keep a possible partial tag
+// across tokens; providers may split either delimiter anywhere.
+export function visibleTextStream(emit) {
+  const open = "<thinking>", close = "</thinking>";
+  let pending = "", thinking = false;
+  const suffixSize = (s, tag) => {
+    for (let n = Math.min(s.length, tag.length - 1); n > 0; n--) {
+      if (s.endsWith(tag.slice(0, n))) return n;
+    }
+    return 0;
+  };
+  return {
+    token(token) {
+      pending += String(token || "");
+      for (;;) {
+        const tag = thinking ? close : open;
+        const at = pending.indexOf(tag);
+        if (at >= 0) {
+          if (!thinking && at) emit(pending.slice(0, at));
+          pending = pending.slice(at + tag.length);
+          thinking = !thinking;
+          continue;
+        }
+        const keep = suffixSize(pending, tag);
+        if (!thinking && pending.length > keep) emit(pending.slice(0, pending.length - keep));
+        pending = keep ? pending.slice(-keep) : "";
+        return;
+      }
+    },
+    end() {
+      if (!thinking && pending) emit(pending);
+      pending = "";
+      thinking = false;
+    },
+  };
+}
 
 /**
  * CLAUDE.md files an agent in this folder is expected to read: the folder's
@@ -66,7 +103,7 @@ export function mcpConfigPath(opts, cwd = process.cwd()) {
 export function createStdioSession({ write, run, sessionId, model, onIdleEnd, onInterrupted }) {
   const modelName = typeof model === "function" ? model : () => model;
   const queue = [];
-  let current = null;       // { controller, interrupted }
+  let current = null;       // { controller, interrupted, steers }
   let busy = false;
   let ended = false;
   let turnNo = 0;
@@ -74,14 +111,51 @@ export function createStdioSession({ write, run, sessionId, model, onIdleEnd, on
   async function runTurn(content) {
     turnNo++;
     const controller = new AbortController();
-    current = { controller, interrupted: false };
+    const turn = { controller, interrupted: false, steers: [], awaitingDelivery: [] };
+    current = turn;
     const started = Date.now();
     let apiCalls = 0;
     let toolSeq = 0;
     const pendingIds = new Map();   // tool name -> ids of its calls not yet answered
+    // tool call id -> { startedAt, args }. By id, not by name: two calls of one
+    // tool can be open at once, and under the name the second start overwrote
+    // the first, so one result went out with duration 0 or the other's args.
+    const toolStarts = new Map();
+
+    // The id of the call a callback is about. The agent loop passes it; a
+    // caller that does not is matched by name, oldest open call first (for a
+    // start: the oldest one not started yet).
+    function callId(name, given, { unstarted = false } = {}) {
+      if (given) return given;
+      const ids = pendingIds.get(name) || [];
+      return (unstarted ? ids.find((id) => !toolStarts.has(id)) : ids[0]) || null;
+    }
+    // A call is answered once: its id leaves the pending list it is in, which
+    // is under the name the model used, not always the one the result carries
+    // (bash is run and reported as run_command).
+    function settle(id) {
+      for (const ids of pendingIds.values()) {
+        const at = ids.indexOf(id);
+        if (at !== -1) { ids.splice(at, 1); return; }
+      }
+    }
+    const visible = visibleTextStream((delta) => write(textDelta(delta, sessionId)));
 
     const observer = {
+      onStreamEnd() { visible.end(); },
+      onCheckQueue() {
+        if (turn.interrupted || !turn.steers.length) return null;
+        const steers = turn.steers.splice(0);
+        turn.awaitingDelivery.push(...steers);
+        return steers.map((item) => item.text);
+      },
+      onApiCall() {
+        for (const item of turn.awaitingDelivery.splice(0)) {
+          write(steerStatus(item.id, "delivered", sessionId));
+        }
+      },
       onReply(reply, usage) {
+        visible.end();
         apiCalls++;
         for (const tc of reply?.tool_calls || []) {
           if (!tc.id) tc.id = `toolu_flint_${turnNo}_${++toolSeq}`;
@@ -92,11 +166,39 @@ export function createStdioSession({ write, run, sessionId, model, onIdleEnd, on
         const ev = assistantEvent({ reply, usage, model: modelName(), sessionId, messageId: `msg_flint_${turnNo}_${apiCalls}` });
         if (ev) write(ev);
       },
-      onToolResult(name, result, denied) {
-        const id = pendingIds.get(name)?.shift() || `toolu_flint_${turnNo}_${++toolSeq}`;
+      onToolStart(name, args, info) {
+        const id = callId(name, info?.id, { unstarted: true });
+        if (id) toolStarts.set(id, { startedAt: info?.startedAt || Date.now(), args: args || {} });
+        write(toolStartEvent({ toolUseId: id, toolName: name, args: args || {}, sessionId }));
+      },
+      onToolResult(name, result, denied, opts = {}) {
+        const known = callId(name, opts?.id);
+        if (known) settle(known);
+        const id = known || `toolu_flint_${turnNo}_${++toolSeq}`;
         const text = typeof result === "string" ? result : JSON.stringify(result);
         const isError = !!denied || /^(error|\[error)/i.test(String(text || "").trim());
-        write(toolResultEvent({ toolUseId: id, result: text, isError, sessionId }));
+        const startEntry = toolStarts.get(id);
+        let durationMs = 0;
+        let startArgs = {};
+        if (startEntry) {
+          durationMs = Date.now() - startEntry.startedAt;
+          startArgs = startEntry.args;
+          toolStarts.delete(id);
+        }
+        write(toolResultEvent({
+          toolUseId: id, result: text, isError, sessionId,
+          toolName: name, args: opts?.args || startArgs, durationMs,
+        }));
+      },
+      // Two callers, one name. The raw stream (no info) feeds text_delta, which
+      // strips <thinking> itself; the handler's filtered tokens (info given)
+      // become the `text` event. A second onToken key in this object would
+      // silently replace the first, so both live here.
+      onToken(token, info) {
+        if (info === undefined) { visible.token(token); return; }
+        if (!info?.inThinking) {
+          write(textEvent({ text: token, sessionId }));
+        }
       },
     };
 
@@ -104,7 +206,7 @@ export function createStdioSession({ write, run, sessionId, model, onIdleEnd, on
     try {
       const res = await run(content, { signal: controller.signal, observer });
       const stats = res?.stats || {};
-      const subtype = current.interrupted ? "error_during_execution" : resultSubtype(res?.stop_reason);
+      const subtype = turn.interrupted ? "error_during_execution" : resultSubtype(res?.stop_reason);
       ev = resultEvent({
         subtype,
         text: res?.text || "",
@@ -114,10 +216,12 @@ export function createStdioSession({ write, run, sessionId, model, onIdleEnd, on
         costUsd: stats.cost,
         promptTokens: stats.promptTokens,
         completionTokens: stats.completionTokens,
-        stopReason: current.interrupted ? "interrupted" : (res?.stop_reason || "done"),
+        stopReason: turn.interrupted ? "interrupted" : (res?.stop_reason || "done"),
+        truncatedAt: res?.truncated_at || null,
+        providerError: turn.interrupted ? null : res?.providerError,
       });
     } catch (err) {
-      const interrupted = current.interrupted || err?.name === "AbortError";
+      const interrupted = turn.interrupted || err?.name === "AbortError";
       ev = resultEvent({
         subtype: "error_during_execution",
         text: interrupted ? "" : `Error: ${err?.message || err}`,
@@ -127,7 +231,11 @@ export function createStdioSession({ write, run, sessionId, model, onIdleEnd, on
         stopReason: interrupted ? "interrupted" : "error",
       });
     } finally {
-      if (current?.interrupted) {
+      visible.end();
+      for (const item of [...turn.steers, ...turn.awaitingDelivery]) {
+        write(steerStatus(item.id, "too_late", sessionId));
+      }
+      if (turn.interrupted) {
         try { await onInterrupted?.(); } catch {}
       }
       current = null;
@@ -160,14 +268,30 @@ export function createStdioSession({ write, run, sessionId, model, onIdleEnd, on
       }
       if (msg.type === "control_request") {
         const subtype = msg.request?.subtype;
-        if (subtype === "interrupt" && current) {
-          current.interrupted = true;
-          current.controller.abort(new Error("interrupted by host"));
+        const id = msg.request_id ?? null;
+        if (subtype === "steer") {
+          const value = msg.request?.text;
+          if (typeof value !== "string" || !value.trim() || value.length > 8000) {
+            write(controlError(id, "invalid_text"));
+          } else if (!current || current.interrupted) {
+            write(controlError(id, "too_late"));
+          } else {
+            current.steers.push({ id, text: value });
+            write(controlResponse(id, { status: "accepted" }));
+          }
+          return;
         }
-        // Every request is answered, so a host waiting on one never hangs:
-        // interrupt with nothing running, initialize, and the requests Flint
-        // has no use for all get a plain success.
-        write(controlResponse(msg.request_id ?? null));
+        if (subtype === "interrupt") {
+          if (current) {
+            current.interrupted = true;
+            current.controller.abort(new Error("interrupted by host"));
+          }
+          write(controlResponse(id));
+        } else if (subtype === "initialize") {
+          write(controlResponse(id));
+        } else {
+          write(controlError(id, "unsupported_control_request"));
+        }
       }
     },
     /** stdin closed: finish what is queued, then end. */

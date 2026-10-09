@@ -28,9 +28,11 @@ describe("stop_reason values", () => {
   //
   // "text-tool-call": the model wrote its tool call into the answer instead of
   // calling the tool, so nothing ran. Said rather than returned as "done".
+  // "model-not-found": the provider answered 404 for this model; retrying gets
+  // the same answer, so the turn ends at once (the stdio result carries it).
   const VALID_STOP_REASONS = [
     "done", "budget", "error", "denied", "rate-limit", "auth", "quota", "empty",
-    "stall", "text-tool-call",
+    "stall", "text-tool-call", "model-not-found",
   ];
 
   it("defines all expected stop reasons", () => {

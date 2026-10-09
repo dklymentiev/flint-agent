@@ -5,6 +5,7 @@
 bench/ export-ignore
 benchmark/ export-ignore
 scripts/readiness-* export-ignore
+scripts/*-mcp-bridge.mjs export-ignore
 tests/unit/readiness-tool-map.test.js export-ignore
 
 # Shell scripts keep LF line ends on every platform, or bash cannot run them.

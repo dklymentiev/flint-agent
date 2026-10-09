@@ -55,5 +55,8 @@ if (parsed || parseError) {
       process.exit(2);
     }
   }
-  if (!process.env.FLINT_DATA_DIR) process.env.FLINT_DATA_DIR = join(homedir(), ".flint");
+  if (!process.env.FLINT_DATA_DIR) {
+    if (parsed.dataDir) process.env.FLINT_DATA_DIR = parsed.dataDir;
+    else process.env.FLINT_DATA_DIR = join(homedir(), ".flint");
+  }
 }

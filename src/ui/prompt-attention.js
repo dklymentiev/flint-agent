@@ -24,6 +24,7 @@
 // the one word that should have been trusted.
 
 import process from "node:process";
+import { fitWidth } from "./title-width.js";
 
 const BELL = "\x07";
 
@@ -36,7 +37,7 @@ const BELL = "\x07";
  * could mean anything, and "waiting for approval" cannot be mistaken for
  * anything else. Both are in it so neither reading is lost.
  */
-export const ATTENTION_TITLE = "[!] Flint needs you — waiting for approval";
+export const ATTENTION_TITLE = "[!] Flint needs you - waiting for approval";
 
 /**
  * Note that a prompt is open.
@@ -72,7 +73,7 @@ export function promptAttentionStart({
   }
 
   try {
-    setTitle(ATTENTION_TITLE);
+    setTitle(fitWidth(ATTENTION_TITLE));
   } catch {}
 
   return { active: true, rings, previousTitle: previous, setTitle };

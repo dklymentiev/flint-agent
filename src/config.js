@@ -2,6 +2,7 @@ import "dotenv/config";
 import path from "node:path";
 import { statSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { homeStateDir, installStateDir } from "./data-dir.js";
 import { getProvider } from "./providers/registry.js";
 import { getActiveProvider, getLastModel } from "./providers/state.js";
 import { getKey, hasKey } from "./providers/keys.js";
@@ -51,6 +52,21 @@ const envModel = process.env.OPENROUTER_MODEL;
 const lastModel = getLastModel(provider.id);
 const initialModel = cliModel || envModel || lastModel || provider.defaultModel;
 
+// Per-turn cost ceiling in dollars when AGENT_MAX_COST is not set. Chosen well
+// above an everyday turn (cents) and above a long agentic one, well below a
+// runaway. The refusal at the API door ends the turn; the model is warned at
+// 50% and 80% first.
+export const DEFAULT_MAX_COST_PER_ACTION = 5;
+
+// An env number: unset or unreadable gives the default, an explicit value
+// (0 included, meaning unlimited) is kept as given.
+function envCost(name, dflt) {
+  const raw = process.env[name];
+  if (raw === undefined || raw === "") return dflt;
+  const n = parseFloat(raw);
+  return Number.isFinite(n) && n >= 0 ? n : dflt;
+}
+
 export const config = {
   // Provider-aware fields (mutable — updated when provider switches)
   provider: provider.id,
@@ -60,6 +76,18 @@ export const config = {
   _apiKeyCache: null,
   _apiKeyCacheProvider: null,
 
+  /**
+   * Map a provider id to the environment variable that carries its key.
+   * Extracted so that both the sync getter and resolveApiKey() share one
+   * definition of which env var belongs to which provider.
+   */
+  _getEnvKeyForProvider(providerId) {
+    if (providerId === "openrouter") return process.env.OPENROUTER_API_KEY || null;
+    if (providerId === "openai") return process.env.OPENAI_API_KEY || null;
+    if (providerId === "anthropic") return process.env.ANTHROPIC_API_KEY || null;
+    return null;
+  },
+
   get apiKey() {
     // Sync getter — returns cached key or env fallback
     // Call config.resolveApiKey at startup for async encrypted key resolution
@@ -67,10 +95,7 @@ export const config = {
       return this._apiKeyCache;
     }
     // Env var fallbacks for backward compat
-    if (this.provider === "openrouter") return process.env.OPENROUTER_API_KEY || null;
-    if (this.provider === "openai") return process.env.OPENAI_API_KEY || null;
-    if (this.provider === "anthropic") return process.env.ANTHROPIC_API_KEY || null;
-    return null;
+    return this._getEnvKeyForProvider(this.provider);
   },
 
   set apiKey(val) {
@@ -78,16 +103,66 @@ export const config = {
     this._apiKeyCacheProvider = this.provider;
   },
 
-  // Resolve API key from encrypted storage (async — call at startup)
-  async resolveApiKey() {
+  // Resolve API key: in headless mode the environment wins (a service account
+  // sets the key explicitly via env); in interactive mode storage wins as
+  // before.  Writes which source was used to stderr — never the key value.
+  //
+  // Why env wins in headless: a headless / CI run sets the key in the
+  // environment on purpose. A key left in encrypted storage from a previous
+  // interactive session (or a different account) must not be used silently —
+  // the defect this prevents is a real charge to the storage account while a
+  // deliberately-set env key was ignored.
+  //
+  // When env and storage both have a key, a warning is emitted so the
+  // operator knows the stored key is being ignored.  This is not an error:
+  // env-on-conflict is the intended behaviour in headless mode, and the
+  // warning is information only.
+  async resolveApiKey({ preferEnv = false } = {}) {
+    const envKey = this._getEnvKeyForProvider(this.provider);
+
+    // A stdio host owns the credential for this process. A key saved from an
+    // earlier interactive run must not silently override the host's rotation.
+    if (preferEnv && envKey) {
+      this._apiKeyCache = envKey;
+      this._apiKeyCacheProvider = this.provider;
+      return envKey;
+    }
+
+    if (this.headless) {
+      if (envKey) {
+        // Env wins — but if storage also holds a key, warn so the
+        // operator knows it is being deliberately ignored.
+        if (hasKey(this.provider)) {
+          process.stderr.write(
+            "[key source] environment variable " +
+            `(stored key for '${this.provider}' ignored)\n`
+          );
+        } else {
+          process.stderr.write("[key source] environment variable\n");
+        }
+        this._apiKeyCache = envKey;
+        this._apiKeyCacheProvider = this.provider;
+        return envKey;
+      }
+      // No env key — fall back to encrypted storage.
+      const key = await getKey(this.provider);
+      if (key) {
+        this._apiKeyCache = key;
+        this._apiKeyCacheProvider = this.provider;
+        process.stderr.write("[key source] encrypted storage\n");
+        return key;
+      }
+      return null;
+    }
+
+    // Interactive (non-headless): storage first, env fallback — unchanged.
     const key = await getKey(this.provider);
     if (key) {
       this._apiKeyCache = key;
       this._apiKeyCacheProvider = this.provider;
       return key;
     }
-    // Fallback to env vars
-    return this.apiKey;
+    return envKey;
   },
 
   get apiUrl() {
@@ -116,10 +191,18 @@ export const config = {
   // Steps per turn. 50 cut real work short: on 2026-09-29 the open-source
   // self-audit hit it 8 times in one afternoon, while everyday tasks need a
   // median of 3 and at most 15 (71-task run). The ceiling is a runaway guard,
-  // not a budget; money is capped by AGENT_MAX_COST.
-  maxIterations: parseInt(process.env.AGENT_MAX_ITERATIONS || "150", 10),
-  maxCostPerAction: parseFloat(process.env.AGENT_MAX_COST || "0"),
+  // not a budget. Money is a separate guard: a per-turn cost ceiling that
+  // defaults to $5 (DEFAULT_MAX_COST_PER_ACTION), so a runaway 500-step turn
+  // cannot spend without limit when nobody configured anything. Raise it with
+  // AGENT_MAX_COST (or --budget); AGENT_MAX_COST=0 turns it off on purpose.
+  // AGENT_SESSION_BUDGET stays unlimited unless set.
+  maxIterations: parseInt(process.env.AGENT_MAX_ITERATIONS || "500", 10),
+  maxCostPerAction: envCost("AGENT_MAX_COST", DEFAULT_MAX_COST_PER_ACTION),
   sessionBudget: parseFloat(process.env.AGENT_SESSION_BUDGET || "0"), // session-level $ limit (0=unlimited)
+  // Wall-clock limit for headless runs (seconds, 0 = unlimited). The
+  // --time-limit flag overrides this; when only the setting is set the timer
+  // fires on its own so a hung call in CI cannot run forever.
+  timeLimit: parseFloat(process.env.AGENT_HEADLESS_TIME_LIMIT || "0") || 0,
   // Unset means "derive from the model's window", see compressThreshold in
   // agent/compression.js. A fixed 50000 with an eager pass at half of it
   // rewrote every read file into a one-line summary at about 25k tokens, and
@@ -153,11 +236,9 @@ export const config = {
   // sessions/ directory and the same memory database, so a measured run
   // carried another process's turns and another process's facts, and a unit
   // test that clears the facts table raced a live agent writing to it.
-  sessionsDir: process.env.FLINT_DATA_DIR
-    ? path.join(path.resolve(process.env.FLINT_DATA_DIR), "sessions")
-    : process.env.AGENT_PARENT_PORT
+  sessionsDir: process.env.AGENT_PARENT_PORT
     ? path.join(PROJECT_ROOT, "sessions", "children")
-    : path.join(PROJECT_ROOT, "sessions"),
+    : path.join(installStateDir(), "sessions"),
   projectRoot: PROJECT_ROOT,
   // Where .permissions.json lives — the operator's own saved permissions,
   // onboarding answer, per-file "[a]lways" approvals.
@@ -179,13 +260,19 @@ export const config = {
   // Production is unchanged: unset means exactly the path it has always meant.
   // A test run points it at a temp dir, so the bytes land there and the
   // checkout is left byte-for-byte as it was found.
+  // Where .permissions.json lives. When --data-dir / FLINT_DATA_DIR is set,
+  // it moves into the data dir so the shared checkout never receives a write.
+  // FLINT_TEST_PERMISSIONS_FILE overrides for unit tests that need to point
+  // at a temp file without setting the full data dir.
   permissionsFile: process.env.FLINT_TEST_PERMISSIONS_FILE
     ? path.resolve(process.env.FLINT_TEST_PERMISSIONS_FILE)
-    : path.join(PROJECT_ROOT, ".permissions.json"),
+    : path.join(installStateDir(), ".permissions.json"),
   // Working directory for agent file operations (created per session)
   // If set, relative paths in file tools resolve from here instead of cwd
   // If empty, defaults to sessions/<sessionId>/workspace/
   workdirBase: process.env.AGENT_WORKDIR || "",
+  // A headless run has nobody to ask: its MCP tools run without approval unless this is "ask".
+  headlessMcp: process.env.FLINT_HEADLESS_MCP || "allow",
   // Filesystem sandbox: comma-separated list of allowed directories
   // If empty/null — unrestricted access
   // Example: AGENT_ALLOWED_PATHS=C:\Projects,C:\tmp,D:\data
@@ -210,7 +297,15 @@ export const config = {
   maxBatchFiles: parseInt(process.env.AGENT_MAX_BATCH_FILES || "20", 10),
   budgetWarningThresholds: (process.env.AGENT_BUDGET_WARNINGS || "0.5,0.8").split(",").map(Number),
   securityPolicy: process.env.AGENT_SECURITY_POLICY || "normal",
-  extractionModel: process.env.EXTRACTION_MODEL || "google/gemini-2.0-flash-001",
+  // Fact extraction model. The old default was the OpenRouter id
+  // google/gemini-2.0-flash-001: gone from the OpenRouter list (404) and, being
+  // an OpenRouter-format id, wrong for every other provider. With no override
+  // it now follows the ACTIVE model, which is by definition valid on the active
+  // provider. A cheaper per-provider model needs verified ids, so it is set
+  // only through EXTRACTION_MODEL.
+  get extractionModel() {
+    return process.env.EXTRACTION_MODEL || this.model;
+  },
   compressThreshold: parseInt(process.env.COMPRESS_THRESHOLD || "500", 10),
   maxContextChars: parseInt(process.env.MAX_CONTEXT_CHARS || "20000", 10),
   maxPromptTokens: parseInt(process.env.MAX_PROMPT_TOKENS || "100000", 10),

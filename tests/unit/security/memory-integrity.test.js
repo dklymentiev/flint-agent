@@ -5,6 +5,7 @@ import { createTmpDir } from "../../helpers/tmp-dir.js";
 
 // Mock config before importing store
 let tmp;
+let previousDataDir;
 const mockConfig = {};
 
 vi.mock("../../../src/config.js", () => ({
@@ -15,6 +16,8 @@ let store;
 
 beforeEach(async () => {
   tmp = createTmpDir();
+  previousDataDir = process.env.FLINT_DATA_DIR;
+  delete process.env.FLINT_DATA_DIR;
   mockConfig.projectRoot = tmp.path;
   mockConfig.sessionsDir = path.join(tmp.path, "sessions");
   // Fresh import to reset module state
@@ -23,6 +26,8 @@ beforeEach(async () => {
 });
 
 afterEach(() => {
+  if (previousDataDir === undefined) delete process.env.FLINT_DATA_DIR;
+  else process.env.FLINT_DATA_DIR = previousDataDir;
   tmp.cleanup();
 });
 

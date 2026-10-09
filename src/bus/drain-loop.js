@@ -258,7 +258,7 @@ async function _processOne(msg) {
     // POST /message + GET /message/:id saw an empty tool list and scored every
     // tool-backed probe as a miss. The readiness harness is exactly that.
     : { response: result?.text || "", stats: result?.stats || {}, stop_reason: stopReason,
-        toolCalls: result?.toolCalls || [], ts: Date.now() };
+        toolCalls: result?.toolCalls || [], repoClaimGap: result?.repoClaimGap || false, truncated_at: result?.truncated_at || null, ts: Date.now() };
   _asyncResults.set(msg.id, resultData);
 
   // Resolve waiting API callers (sync mode)
@@ -268,7 +268,7 @@ async function _processOne(msg) {
     if (error) {
       waiter.resolve({ error: error.message });
     } else {
-      waiter.resolve({ response: result?.text || "", stats: result?.stats || {}, stop_reason: stopReason, toolCalls: result?.toolCalls || [] });
+      waiter.resolve({ response: result?.text || "", stats: result?.stats || {}, stop_reason: stopReason, toolCalls: result?.toolCalls || [], repoClaimGap: result?.repoClaimGap || false, truncated_at: result?.truncated_at || null });
     }
   }
 
@@ -339,6 +339,11 @@ async function _processOne(msg) {
       plan,
       isApiScoped: !!app.apiGoalId,
       apiGoalId: app.apiGoalId,
+      // API self-continue is opt-in: only the autonomous flag (set by
+      // body.autonomous=true in the API request, or by /auto in TUI) enables
+      // self-continue for API-scoped runs. Without it, an API message that
+      // creates a plan with pending tasks stops after one turn.
+      apiSelfContinue: app.apiSelfContinue || app.autonomous,
     });
 
     if (decision.action === "stop") {

@@ -51,6 +51,7 @@ export function appendOnce(text, addition) {
 import { executeToolWithPermissions } from "../tools/permissions.js";
 import { compressContext, compressThreshold } from "./compression.js";
 import { config } from "../config.js";
+import { homeStateDir, installStateDir } from "../data-dir.js";
 import { detectPersonaHijack } from "../security/persona-guard.js";
 import { evaluateToolCall, resetSupervisor, checkMidTaskDescription, evaluateReflection, trackExpect } from "./supervisor.js";
 import { checkTextLoop, checkToolLoop, checkDesktopLoop, resetDesktopOnMeaningfulText, resetTurn } from "./flow-controller.js";
@@ -66,6 +67,7 @@ import { findSimilarRequests, formatRetrievalHint } from "../memory/retrieval.js
 import { setProcessAbortSignal } from "../tools/process-tools.js";
 import { createLogger } from "../logging/logger.js";
 import { createChangeTracker } from "./workspace-changes.js";
+import { gitStatusCheck, repoClaimGap, canChangeWorkspace } from "./git-status.js";
 import { writeFileSync, appendFileSync, mkdirSync, promises as fsp } from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -229,8 +231,8 @@ function stripThinkingTokens(reply) {
  *   onThinking()           — spinner start
  *   onToken(token)         — streaming token
  *   onStreamEnd()          — streaming done
- *   onToolStart(name,args) — tool execution starting
- *   onToolResult(name,result) — tool finished
+ *   onToolStart(name,args,{id}) — tool execution starting; id is the tool call id
+ *   onToolResult(name,result,denied,{args,id}) — tool finished; id is the tool call id
  *   onThought(text)        — think tool used
  *   onApiCall(callNum, messages, tools) — before API call
  *   onApiResponse(callNum, reply, usage) — after API call
@@ -601,6 +603,13 @@ export async function runAgent(messages, callbacks = {}, { sessionId, signal, se
   // How many answers in this turn were a tool call written as text.
   let textToolCallTurns = 0;
   const budgetPressureSent = { notice: false };
+  // Hoisted from inside the loop body so finish() can read it: the iteration
+  // ceiling is resolved once per turn, but finish() runs at the end of the
+  // turn, outside the loop body that declared it as a block-scoped const.
+  // A stale value is impossible — the loop sets it before any ceiling check
+  // can branch, and finish() is only called from inside the branch that
+  // followed.
+  let effectiveMaxIter = config.maxIterations;
   let summaryRequested = false;
   let consecutiveToolErrors = 0;
   // How many times each tool has been refused in this turn. A refusal is a
@@ -618,20 +627,50 @@ export async function runAgent(messages, callbacks = {}, { sessionId, signal, se
   // agent can promise, and pretending otherwise would be worse.
   // Flint's own state is not the turn's work: it writes the session log on
   // every step, and when it runs from its own folder that log is under cwd.
+  // Track both process.cwd() and config.workdir: the former catches changes
+  // the task made in its own repository (via shell commands), the latter
+  // catches files the write tools create in the session workspace. The skip
+  // list below provides the second-line defence (sessionsDir, ~/.flint).
   const changeTracker = createChangeTracker({
     roots: [process.cwd(), config.workdir],
-    skip: [config.sessionsDir, process.env.FLINT_DATA_DIR || path.join(os.homedir(), ".flint")],
+    skip: [config.sessionsDir, homeStateDir(), installStateDir()],
   });
   const lastUserText = stripTimeStamp([...messages].reverse().find((m) => m.role === "user" && typeof m.content === "string")?.content);
   changeTracker.watchPathsIn(lastUserText);
   let toolCallsThisTurn = 0;
+  // Calls that ran AND can change the repo (see canChangeWorkspace). Only these
+  // make a clean repo at the end of the turn a claim gap: a turn that read files
+  // or worked outside the tree claimed nothing about the repo.
+  let repoMutatingCallsThisTurn = 0;
   // Every return carries the files this turn changed, read off the disk, for
   // the receipt the console prints at the end of the turn (ui/tool-ledger.js).
   // null when the folders were too big to read; [] when no tool ran.
-  const finish = (r) => ({
-    ...r,
-    filesChanged: toolCallsThisTurn > 0 ? (changeTracker.changes()?.files ?? null) : [],
-  });
+  // repoClaimGap: true when executing tools ran but the git repo was clean
+  // at finish — i.e. the turn's answer claims changes that left no trace.
+  // The footer and API response attach the same flag.
+  const finish = (r) => {
+    const filesChanged = toolCallsThisTurn > 0 ? (changeTracker.changes()?.files ?? null) : [];
+    // Git check is done once per turn, after the disk snapshot, and only when a
+    // call that can change the repo ran: it is a synchronous child process (up
+    // to 3s), and without such a call there is no claim for it to arbitrate.
+    const gitStatus = repoMutatingCallsThisTurn > 0 ? gitStatusCheck(config.workdir || process.cwd()) : null;
+    const repoClean = gitStatus?.isRepo ? gitStatus.clean : null;
+    // When the turn was cut by the step ceiling (summaryRequested or budget
+    // return), attach a structured marker so callers — the API response, the
+    // stream-json protocol — do not have to grep the text note for it.
+    // The limit is not raised here: 150 stays the cap, this only reports that
+    // it was the ceiling that ended the turn.
+    const truncated_at = summaryRequested
+      ? { type: "max_iterations", limit: effectiveMaxIter, used: apiCallCount }
+      : null;
+    return {
+      ...r,
+      filesChanged,
+      repoClean,
+      repoClaimGap: repoClaimGap({ toolCallsThisTurn: repoMutatingCallsThisTurn, filesChanged, repoClean }),
+      ...(truncated_at ? { truncated_at } : {}),
+    };
+  };
   const toolNamesThisTurn = [];
   // Order, not just counts: "was the change run" is "did anything execute
   // AFTER the last edit", and only the order answers that. Held as the
@@ -734,7 +773,7 @@ export async function runAgent(messages, callbacks = {}, { sessionId, signal, se
     // steps in one run and 30 in the next (intent log 2026-09-22 03:19 vs
     // 05:05), and the 30-step runs ended mid-edit. A guess about the task
     // should not decide when the work on it stops.
-    const effectiveMaxIter = config.maxIterations;
+    effectiveMaxIter = config.maxIterations;
     if (apiCallCount >= effectiveMaxIter) {
       const costStr = stats._cost != null ? ` | spent: $${stats._cost.toFixed(4)}` : "";
       if (!summaryRequested) {
@@ -818,7 +857,7 @@ export async function runAgent(messages, callbacks = {}, { sessionId, signal, se
     // Deep compress for very long sessions (threshold-based)
     if (iterationStart > 0) {
       try {
-        await compressContext(messages, prevIterationStart, iterationStart, sessionId, { keepToolResults: !!swap });
+        await compressContext(messages, prevIterationStart, iterationStart, sessionId, { keepToolResults: !!swap, contextTokens: stats.contextTokens || 0 });
       } catch {}
     }
 
@@ -1010,7 +1049,23 @@ export async function runAgent(messages, callbacks = {}, { sessionId, signal, se
         // retryAfter travels with the reason: a 429 says "not now", and the
         // only honest way to decide how long "now" lasts is the number the
         // provider itself sent. Autonomous runs read it.
-        return finish({ text: msg, stats, stop_reason: kind, retryAfter: err.retryAfter ?? null });
+        return finish({ text: msg, stats, stop_reason: kind, retryAfter: err.retryAfter ?? null, ...(kind === "auth" ? { providerError: { status: err.statusCode, kind: "auth" } } : {}) });
+      }
+
+      // A 404 on the chat call is the provider saying this model is not served
+      // to this key. Asking again gets the same answer, so the turn ends now
+      // instead of after three tries, and the verdict travels as data (the
+      // stdio result carries it) for a host that must tell "no such model"
+      // from a model that answered badly.
+      // OpenRouter also answers 404 "No endpoints found that support image input"
+      // to a text-only model: that is the image refusal handled just below, not
+      // a missing model, so it must not end the turn here.
+      if (err.isModelNotFound && !isImageRefusal(err)) {
+        agentLog.error("API model not found", { status: err.statusCode, apiCallCount });
+        messages.push({ role: "assistant", content: err.message });
+        onToken?.(err.message);
+        onStreamEnd?.();
+        return finish({ text: err.message, stats, stop_reason: "model-not-found", providerError: { status: 404, kind: "model-not-found" } });
       }
 
       // The provider refused an image: this model cannot see. That is a fact
@@ -1031,7 +1086,11 @@ export async function runAgent(messages, callbacks = {}, { sessionId, signal, se
       const cause = err.cause ? { code: err.cause.code, message: err.cause.message, name: err.cause.name } : undefined;
       agentLog.error("API call failed", { attempt: consecutiveApiErrors, error: err.message, cause, apiCallCount });
       if (consecutiveApiErrors >= 3) {
-        const msg = `API error (${consecutiveApiErrors}x): ${err.message}`;
+        // "fetch failed" alone does not say the server is not there. The cause
+        // (ECONNREFUSED, ENOTFOUND, a timeout) and where we tried say it.
+        const why = cause?.code || cause?.message;
+        const where = why && config.provider ? ` (provider ${config.provider}, model ${config.model})` : "";
+        const msg = `API error (${consecutiveApiErrors}x): ${err.message}${why ? ` [${why}]` : ""}${where}`;
         messages.push({ role: "assistant", content: msg });
         onToken?.(msg);
         onStreamEnd?.();
@@ -1422,7 +1481,10 @@ export async function runAgent(messages, callbacks = {}, { sessionId, signal, se
         throw Object.assign(new Error("Aborted"), { name: "AbortError" });
       }
 
-      const name = tc.function.name;
+      // `name` is what the model called; after the permission layer resolves a
+      // synonym (bash -> run_command) it holds the REAL tool name, and everything
+      // downstream (execution tracking, denial counts, UI, summaries, swap) uses that.
+      let name = tc.function.name;
       let args;
       try {
         args = JSON.parse(tc.function.arguments);
@@ -1450,7 +1512,7 @@ export async function runAgent(messages, callbacks = {}, { sessionId, signal, se
       if (name === "think") {
         onThought?.(args.thought);
       } else {
-        onToolStart?.(name, args);
+        onToolStart?.(name, args, { id: tc.id });
       }
 
       // A folder this call names is read before the call can change it.
@@ -1464,7 +1526,8 @@ export async function runAgent(messages, callbacks = {}, { sessionId, signal, se
       // tool calls". A command that takes three minutes is the one moment an
       // operator most needs to be told what is happening.
       onActivity?.({ kind: "tool", label: toolActivityLabel(name, args) });
-      const { result, denied, denyKey } = await executeToolWithPermissions(name, args);
+      const { result, denied, denyKey, name: resolvedName } = await executeToolWithPermissions(name, args, { sessionId });
+      if (resolvedName) name = resolvedName;
       if (denied) {
         // Track per matched pattern (for run_command) or per tool name.
         // Three different refused commands don't end the turn; three
@@ -1473,6 +1536,7 @@ export async function runAgent(messages, callbacks = {}, { sessionId, signal, se
         deniedByTool.set(key, (deniedByTool.get(key) || 0) + 1);
       }
       toolCallsThisTurn++;
+      if (!denied && canChangeWorkspace(name, args, config.workdir || process.cwd())) repoMutatingCallsThisTurn++;
       // The names, not just the count: the out-of-band question about a turn
       // that changed nothing is answered from evidence, and "what did you
       // reach for" is most of that evidence.
@@ -1481,12 +1545,12 @@ export async function runAgent(messages, callbacks = {}, { sessionId, signal, se
 
       if (!denied && result && typeof result === "object" && result._table) {
         // Table result — store as dataset, render page in UI, send summary to model
-        onToolResult?.(name, { _table: true, ...result }, false, { args });
+        onToolResult?.(name, { _table: true, ...result }, false, { args, id: tc.id });
         // Send compact summary to model (not all rows — they're in the dataset store)
         const totalRows = result.rows.length;
         const pageSize = 10;
         const showRows = result._pagination ? result.rows : result.rows.slice(0, pageSize);
-        const textVersion = result.title + "\n" + result.columns.join(" | ") + "\n" +
+        const textVersion = (result._announcement ? result._announcement + "\n" : "") + result.title + "\n" + result.columns.join(" | ") + "\n" +
           showRows.map((r) => r.join(" | ")).join("\n") +
           (totalRows > pageSize && !result._pagination ? `\n... and ${totalRows - pageSize} more rows. Use show_dataset to navigate.` : "");
         const safeResult = `<${_sessionDelimiter} name="${name}">\n${textVersion}\n</${_sessionDelimiter}>`;
@@ -1501,8 +1565,8 @@ export async function runAgent(messages, callbacks = {}, { sessionId, signal, se
         // Image tool result — DEFERRED vision:
         // Current iteration: image goes into messages AS-IS (model sees full image + OCR coords)
         // Next iteration: compression.js replaces image with text description via vision call
-        const imageCaption = result.text || `[Image from ${name}]`;
-        onToolResult?.(name, imageCaption, false, { skipLog: true, args });
+        const imageCaption = (result._announcement ? result._announcement + "\n" : "") + (result.text || `[Image from ${name}]`);
+        onToolResult?.(name, imageCaption, false, { skipLog: true, args, id: tc.id });
 
         // Save image as file in session directory (for traceability)
         let savedImagePath = null;
@@ -1582,7 +1646,7 @@ export async function runAgent(messages, callbacks = {}, { sessionId, signal, se
         // Strip Screenbox [RECENT ACTIONS] block — confuses model into thinking history is current state
         resultStr = resultStr.replace(/\[RECENT ACTIONS\][\s\S]*?(?=\n\n|\n[A-Z]|\n$|$)/, "").trim();
         if (name !== "think") {
-          onToolResult?.(name, resultStr, denied, { args });
+          onToolResult?.(name, resultStr, denied, { args, id: tc.id });
         }
         // A result bigger than the swap's resultMax goes to the session's disk
         // as it arrives; the model gets its stub, head and outline, and
@@ -1610,6 +1674,7 @@ export async function runAgent(messages, callbacks = {}, { sessionId, signal, se
           content: safeResult,
           _toolName: name,
           _toolArgs: args,
+          _denied: !!denied,
           ...(swapId ? { _swap: swapId } : {}),
         });
       }

@@ -1,15 +1,16 @@
 // Plugin loader for Flint
-// Scans ~/.flint/plugins/ and loads plugin modules
+// Scans <data-dir>/plugins/ and loads plugin modules
 
 import { readdirSync, existsSync, readFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
-import { homedir } from "node:os";
+import { homeStateDir } from "../data-dir.js";
 
 // Read on every call, not fixed at import: FLINT_PLUGINS_DIR lets a test (or a
-// bench subject) keep its plugins out of the user's ~/.flint/plugins.
+// bench subject) keep its plugins out of the user's home state dir. When unset,
+// plugins live in <home-state-dir>/plugins (FLINT_DATA_DIR or ~/.flint).
 function pluginsDir() {
-  return process.env.FLINT_PLUGINS_DIR || join(homedir(), ".flint", "plugins");
+  return process.env.FLINT_PLUGINS_DIR || join(homeStateDir(), "plugins");
 }
 
 // Ensure plugins directory exists

@@ -258,6 +258,12 @@ export const SECRET_FILE_PATTERNS = [
   /\.netrc$/i,
 ];
 
+// `git [global options] stash`: the real subcommand, nothing else that merely
+// contains the word. A value is a quoted string or one word.
+const GIT_VALUE = String.raw`(?:"[^"]*"|'[^']*'|\S+)`;
+const GIT_GLOBAL_OPTION = String.raw`(?:-[Cc]\s+${GIT_VALUE}|--(?:git-dir|work-tree|namespace|exec-path|super-prefix|config-env|attr-source)(?:=${GIT_VALUE}|\s+${GIT_VALUE})|--?[A-Za-z][\w-]*(?:=${GIT_VALUE})?)`;
+export const GIT_STASH_SUBCOMMAND = new RegExp(String.raw`\bgit(?:\s+${GIT_GLOBAL_OPTION})*\s+stash(?![\w./-])`);
+
 // Command deny patterns — dangerous shell commands
 export const COMMAND_DENY_PATTERNS = [
   /rm\s+(-[a-zA-Z]*f[a-zA-Z]*\s+)?(-[a-zA-Z]*r[a-zA-Z]*\s+)?\//,  // rm -rf /
@@ -279,6 +285,20 @@ export const COMMAND_DENY_PATTERNS = [
   /\bdiskpart\b/i,                         // diskpart (clean, format, delete partition)
   /\b(rd|rmdir)\s+(\/[sq]\s+){2}['"]?[a-zA-Z]:\\?['"]?(\s|$)/i, // rd /s /q C:\
   /\bRemove-Item\b(?=[^|;&]*\s-Recurse)(?=[^|;&]*\s['"]?[a-zA-Z]:\\?\*?['"]?(\s|$|"))/i, // Remove-Item -Recurse C:\
+  // git stash is shared across ALL worktrees of a repository. A bare `git stash`
+  // (or `git stash pop`) in one worktree extracts another worktree's stash
+  // into the running checkout, overwriting files the operator did not mean to
+  // touch. This is denied, not confirmed: the safe alternatives (commit, or a
+  // patch file) are always available and do not cross worktree boundaries.
+  //
+  // The pattern must catch every form regardless of global git options between
+  // "git" and "stash": `git -C /path stash pop`, `git --no-pager stash`,
+  // `git -c foo=bar stash`, etc. It walks only the GLOBAL OPTIONS (with their
+  // values) after "git" and then requires "stash" as the subcommand. The guard
+  // collapses newlines to spaces before matching, so a looser "anything up to
+  // the word stash" also blocked `git status<nl>cat stash.txt`,
+  // `git add src/stash.js`, `git branch stash-fix` and `git log -- stash/`.
+  { pattern: GIT_STASH_SUBCOMMAND, label: "git stash — blocked: shared across all worktree branches, overwrites files from other worktrees. Commit your work or save a patch file instead." },
 ];
 
 // Commands that need forced confirmation even when permission is "allow".

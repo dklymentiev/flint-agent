@@ -121,6 +121,12 @@ describe("a turn running out of steps, inside the real loop", () => {
     const result = await runAgent(messages, {});
 
     expect(result.stop_reason).toBe("budget");
+    // Structured field alongside the text note.
+    expect(result.truncated_at).toEqual({
+      type: "max_iterations",
+      limit: GLOBAL_MAX,
+      used: payloads.length,
+    });
     expect(payloads.length).toBeGreaterThan(INTENT_MAX);
     expect(payloads.length).toBeGreaterThanOrEqual(GLOBAL_MAX);
 
@@ -169,5 +175,18 @@ describe("a turn running out of steps, inside the real loop", () => {
     // Whatever else it says, the file it touched is named.
     expect(result.text).toContain("half-written.js");
     expect(result.text).toMatch(/half-finished|cut short/i);
+
+    // Structured field: the turn was cut by the step limit. `used` counts the
+    // real number of provider calls, which includes the summary turn the loop
+    // spends after hitting the ceiling — so it is effectiveMaxIter + 1, not
+    // exactly effectiveMaxIter. The first test asserts against its own
+    // payload count for the same reason.
+    expect(result.truncated_at).toEqual({
+      type: "max_iterations",
+      limit: 50,
+      used: 51,
+    });
+    // stop_reason is still "budget" so existing callers keep working.
+    expect(result.stop_reason).toBe("budget");
   }, 30000);
 });

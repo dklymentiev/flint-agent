@@ -3,15 +3,36 @@
 // carries protocol lines only, that the agent's folder is its cwd, that the
 // CLAUDE.md and .mcp.json there are read, and that closing stdin ends it.
 import { describe, it, expect } from "vitest";
-import { spawn } from "node:child_process";
-import { mkdtempSync, writeFileSync, realpathSync } from "node:fs";
+import { spawn, spawnSync } from "node:child_process";
+import { existsSync, mkdtempSync, writeFileSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
 
 describe("stdio mode process", () => {
+  it("prefers a host key over a key saved by an earlier run", () => {
+    const home = mkdtempSync(path.join(tmpdir(), "flint-stdio-key-"));
+    const keysUrl = pathToFileURL(path.join(ROOT, "src", "providers", "keys.js")).href;
+    const configUrl = pathToFileURL(path.join(ROOT, "src", "config.js")).href;
+    const script = `
+      const { setKey } = await import(${JSON.stringify(keysUrl)});
+      await setKey("openrouter", "old-saved-key");
+      const { config } = await import(${JSON.stringify(configUrl)});
+      const key = await config.resolveApiKey({ preferEnv: true });
+      if (key !== "new-host-key") process.exit(2);
+    `;
+    const child = spawnSync(process.execPath, ["--input-type=module", "-e", script], {
+      env: { ...process.env, HOME: home, FLINT_DATA_DIR: home,
+        FLINT_PROVIDER: "openrouter", OPENROUTER_API_KEY: "new-host-key" },
+      encoding: "utf8", timeout: 10000,
+    });
+    expect(child.status, child.stderr).toBe(0);
+    // The saved key lives in the data dir (FLINT_DATA_DIR), not under HOME/.flint.
+    expect(existsSync(path.join(home, "keys.enc"))).toBe(true);
+  });
+
   it("prints only protocol lines and exits 0 when stdin closes", async () => {
     const agent = realpathSync(mkdtempSync(path.join(tmpdir(), "flint-stdio-agent-")));
     const data = mkdtempSync(path.join(tmpdir(), "flint-stdio-data-"));
@@ -21,7 +42,8 @@ describe("stdio mode process", () => {
       "--input-format", "stream-json", "--output-format", "stream-json",
       "--session-id", "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"], {
       cwd: agent,
-      env: { ...process.env, FLINT_DATA_DIR: data, MCP_SERVERS: "" },
+      env: { ...process.env, HOME: data, FLINT_DATA_DIR: data,
+        OPENROUTER_API_KEY: "stdio-process-key-must-stay-in-env", MCP_SERVERS: "" },
       stdio: ["pipe", "pipe", "pipe"],
     });
     let out = "";
@@ -43,5 +65,6 @@ describe("stdio mode process", () => {
     });
     expect(realpathSync(parsed[0].cwd)).toBe(agent);
     expect(parsed[0].tools).toContain("run_command");
+    expect(existsSync(path.join(data, ".flint", "keys.enc"))).toBe(false);
   }, 90000);
 });

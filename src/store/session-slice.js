@@ -63,6 +63,14 @@ export const createSessionSlice = (set, get) => ({
   plan: null,
   pastedImages: [],
   userMessageCount: 0,
+  // Session-wide totals the headless result reports: every tool call the
+  // agent made in this session (approved + denied), and how many of those
+  // the permission guard rejected. These are not per-turn — they survive
+  // across the whole headless invocation so a caller can see at a glance
+  // how much the run did and how much friction the security gate put in the
+  // way.
+  totalToolCalls: 0,
+  deniedCalls: 0,
 
   setSession(sessionId, messages, inputHistory) {
     const userCount = messages ? messages.filter((m) => m.role === "user").length : 0;
@@ -85,6 +93,8 @@ export const createSessionSlice = (set, get) => ({
       sessionCacheWriteTokens: 0,
       sessionCostEstimated: false,
       sessionUsageBySource: {},
+      totalToolCalls: 0,
+      deniedCalls: 0,
     });
   },
 
@@ -152,6 +162,41 @@ export const createSessionSlice = (set, get) => ({
     });
   },
 
+  /**
+   * Fold ONE provider call into the live session totals, so the cost shown by
+   * the status line, /status and the API usage block climbs after every call
+   * instead of only after the turn ends.
+   *
+   * Called by the provider door (src/api/client.js) right after it records a
+   * call. `entry` is that single call's per-source figures in the same shape
+   * drainUsage() uses, with `calls` counting this one call. The end-of-turn
+   * drain is then fed an empty ledger (every call was already pushed live) and
+   * addUsage() is a no-op for them, so nothing is counted twice.
+   *
+   * @param {string} source - one of USAGE_SOURCES
+   * @param {object} entry - { calls, promptTokens, completionTokens,
+   *   cachedTokens, cacheWriteTokens, cost, estimated } for this single call
+   */
+  applyUsage(source, entry) {
+    if (!entry || !entry.calls) return;
+    const s = get();
+    const promptTokens = entry.promptTokens || 0;
+    const completionTokens = entry.completionTokens || 0;
+    const cached = entry.cachedTokens || 0;
+    const cacheWrite = entry.cacheWriteTokens || 0;
+    const cost = entry.cost || 0;
+    const estimated = !!entry.estimated;
+    set({
+      sessionPromptTokens: s.sessionPromptTokens + promptTokens,
+      sessionCompletionTokens: s.sessionCompletionTokens + completionTokens,
+      sessionCachedTokens: s.sessionCachedTokens + cached,
+      sessionCacheWriteTokens: s.sessionCacheWriteTokens + cacheWrite,
+      sessionCost: s.sessionCost + cost,
+      sessionCostEstimated: s.sessionCostEstimated || estimated,
+      sessionUsageBySource: mergeSource(s.sessionUsageBySource, source, entry),
+    });
+  },
+
   pushInputHistory(input) {
     const { inputHistory } = get();
     set({ inputHistory: [...inputHistory, input] });
@@ -171,6 +216,8 @@ export const createSessionSlice = (set, get) => ({
       sessionUsageBySource: {},
       lastContextTokens: 0,
       userMessageCount: 0,
+      totalToolCalls: 0,
+      deniedCalls: 0,
       plan: null,
       lastSummary: null,
       pastedImages: [],
@@ -187,5 +234,17 @@ export const createSessionSlice = (set, get) => ({
 
   setLastSummary(lastSummary) {
     set({ lastSummary });
+  },
+
+  // Per-turn accumulator: how many tool calls ran (or were attempted) and how
+  // many the guard rejected, added to the session totals by message-handler
+  // after each processMessage. Held as a delta so a turn that is interrupted
+  // (SIGTERM / time limit / escape) still credits everything it started.
+  addTurnToolCalls(count = 0, denied = 0) {
+    const s = get();
+    set({
+      totalToolCalls: s.totalToolCalls + count,
+      deniedCalls: s.deniedCalls + denied,
+    });
   },
 });

@@ -531,8 +531,8 @@ Set in the environment or in `.env` in Flint's folder. Selected variables:
 | `FLINT_PLUGIN_INSTALL` | `ask` | `allow` lets the agent install plugins without asking |
 | `FLINT_SELF_VERIFY` | `off` | `on` adds a round that asks the model to check a change it made |
 | `AGENT_MAX_RESPONSE_TOKENS` | `16384` | Max tokens per model response |
-| `AGENT_MAX_ITERATIONS` | `150` | Max steps per turn |
-| `AGENT_MAX_COST` | `0` (no limit) | Max cost per message, USD |
+| `AGENT_MAX_ITERATIONS` | `500` | Max steps per turn |
+| `AGENT_MAX_COST` | `5` | Max cost per message, USD; `0` turns the limit off |
 | `AGENT_SESSION_BUDGET` | `0` (no limit) | Max cost per session, USD |
 | `AGENT_AUTO_MAX_ITERATIONS` | `50` | Auto mode step limit |
 | `AGENT_AUTO_MAX_COST` | `0.50` | Auto mode cost limit, USD |

@@ -25,9 +25,15 @@ Score: tasks passed out of 6.
 
 ## Running
 
-- One Flint per model in stdio mode (docs/stdio-mode.md): its own data folder
-  and work folder, no MCP servers, all tools allowed, the six tasks as six
-  turns, 120 s per task at most. Nothing touches the operator's session.
+- One fresh Flint per task in stdio mode (docs/stdio-mode.md), so no task
+  sees the conversation of an earlier one: its own data folder and work folder,
+  no MCP servers, all tools allowed. The check waits for the agent's init event
+  (FLINT_CHECK_STARTUP_S, default 120 s) and starts the next agent while the
+  current task runs. 120 s per task at most (FLINT_CHECK_TASK_TIMEOUT_S).
+  Nothing touches the operator's session.
+- A 404 model-not-found or a 401/403 from the provider ends the check at once:
+  the model is reported as "unavailable: <reason>", with no score, nothing
+  saved. A run where an agent did not start is not saved either.
 - `/model test` checks the current model; `/model test <id> [<id> ...]`
   those; `/model test free` every free model with tool calling. It runs in
   the background and prints one line per model as it finishes, then a table.

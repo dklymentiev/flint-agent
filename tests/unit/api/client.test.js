@@ -13,7 +13,8 @@ vi.mock("../../../src/config.js", () => ({
 
 vi.mock("../../../src/providers/registry.js", () => ({
   getProvider: () => ({
-    id: "openrouter",
+    // A test may name another provider (the 404 hint differs for Ollama).
+    id: globalThis.__clientTestProviderId || "openrouter",
     name: "OpenRouter",
     format: "openai",
     baseUrl: "https://test.api/v1",
@@ -200,5 +201,57 @@ describe("OpenRouter provider preference", () => {
     }
     expect(bodies[0].provider).toEqual({ only: ["xiaomi", "atlas-cloud"], allow_fallbacks: false });
     expect(bodies[1].provider).toBeUndefined();
+  });
+});
+
+describe("404 from a provider", () => {
+  it("names the model and says what to do", async () => {
+    globalThis.fetch = vi.fn(async () => ({
+      ok: false,
+      status: 404,
+      text: async () => '{"error":"model not found"}',
+      headers: { get: () => null },
+    }));
+    let err;
+    try {
+      await chatCompletion([{ role: "user", content: "hi" }], [], null, { model: "gone/model-1", stream: false });
+    } catch (e) {
+      err = e;
+    }
+    expect(err).toBeTruthy();
+    expect(err.statusCode).toBe(404);
+    expect(err.message).toMatch(/gone\/model-1/);
+    expect(err.message).toMatch(/\/model/);
+    expect(err.message).toMatch(/model not found/);
+    // The verdict as data: the agent loop ends the turn on this flag instead
+    // of retrying, and the model check reads it to say "unavailable". A 404
+    // without it is retried three times and reported as a model that answered
+    // badly.
+    expect(err.isModelNotFound).toBe(true);
+    expect(err.message).toContain("retired");
+    expect(err.message).not.toContain("ollama pull");
+  });
+
+  // The Ollama 404 is the one a first-time user actually meets (the model is
+  // not pulled), and its hint is a command, not "it may have been retired".
+  it("on Ollama it says how to pull the model", async () => {
+    globalThis.__clientTestProviderId = "ollama";
+    globalThis.fetch = vi.fn(async () => ({
+      ok: false,
+      status: 404,
+      text: async () => '{"error":"model not found"}',
+      headers: { get: () => null },
+    }));
+    let err;
+    try {
+      await chatCompletion([{ role: "user", content: "hi" }], [], null, { model: "llama3.2", stream: false });
+    } catch (e) {
+      err = e;
+    } finally {
+      delete globalThis.__clientTestProviderId;
+    }
+    expect(err?.isModelNotFound).toBe(true);
+    expect(err.message).toContain("ollama pull llama3.2");
+    expect(err.message).not.toContain("retired");
   });
 });

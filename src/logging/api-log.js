@@ -82,8 +82,13 @@ export function logApiCall(sessionId, callNum, messages, tools, reply, usage) {
           .join("; ");
       }
 
+      const details = usage?.prompt_tokens_details || {};
+      const cached = details.cached_tokens || 0;
+      const cacheWrite = details.cache_write_tokens || 0;
+      const promptTokens = usage?.prompt_tokens || 0;
+      const completionTokens = usage?.completion_tokens || 0;
       const usageStr = usage
-        ? `prompt=${usage.prompt_tokens || 0} completion=${usage.completion_tokens || 0} total=${(usage.prompt_tokens || 0) + (usage.completion_tokens || 0)}`
+        ? `prompt=${promptTokens} completion=${completionTokens} total=${promptTokens + completionTokens} cached=${cached} cache_write=${cacheWrite}`
         : "n/a";
 
       appendFileSync(

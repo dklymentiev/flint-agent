@@ -38,11 +38,16 @@ function withoutSessionArgs(args) {
   return out;
 }
 
-// The stdio mode (src/stdio) is driven by a program, not a person: no splash,
+// The stdio and check modes are driven by a program, not a person: no splash,
 // no spinner, and the agent runs in the folder it was started from, which is
 // the agent's own folder (its CLAUDE.md, .mcp.json and files).
 const stdioMode = userArgs.includes("--stdio") || userArgs.some((a, i) =>
   (a === "--input-format" || a === "--output-format") && userArgs[i + 1] === "stream-json");
+
+// --help is answered by the child (src/early-flags.js) before it loads anything;
+// no splash or spinner is drawn over it. (help.js is not imported here: the
+// launcher is also run copied on its own, by tests.)
+const headlessMode = userArgs.includes("--headless") || userArgs.includes("--check") || userArgs.includes("--help") || userArgs.includes("-h");
 
 // Clear screen + show the FLiNT mark (src/ui/splash.js) with a loading spinner
 // on its second row. Raw escapes, no chalk: the launcher loads nothing it can
@@ -50,7 +55,7 @@ const stdioMode = userArgs.includes("--stdio") || userArgs.some((a, i) =>
 const _mark0 = " \x1b[38;5;250m▀▀▀ █   \x1b[38;5;220m▀\x1b[38;5;250m █▄ █ ▀█▀\x1b[0m";
 const _mark1 = " \x1b[38;5;250m█▀▀ █▄▄ █ █ ▀█  █\x1b[0m";
 const _frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
-if (!stdioMode) process.stderr.write(`\x1b[2J\x1b[H\n${_mark0}\n${_mark1}   \x1b[38;5;244m${_frames[0]} loading...\x1b[0m`);
+if (!stdioMode && !headlessMode) process.stderr.write(`\x1b[2J\x1b[H\n${_mark0}\n${_mark1}   \x1b[38;5;244m${_frames[0]} loading...\x1b[0m`);
 let _fi = 0;
 let _released = false;
 const _spinner = setInterval(() => {
@@ -58,6 +63,10 @@ const _spinner = setInterval(() => {
   if (_released) return;
   process.stderr.write(`\r${_mark1}   \x1b[38;5;244m${_frames[_fi]} loading...\x1b[0m`);
 }, 120);
+
+if (headlessMode) {
+  releaseTerminal();
+}
 
 /**
  * Hand the terminal over to the child.
@@ -102,6 +111,9 @@ function start(extraArgs = []) {
     // "I have drawn" so the spinner stops repainting over it.
     stdio: ["inherit", "inherit", "inherit", "ipc"],
     cwd: stdioMode ? process.cwd() : projectRoot,
+    // The child runs from Flint's own folder, so tell it where the operator
+    // really is: that folder is the one base for every file tool.
+    env: { ...process.env, FLINT_LAUNCH_DIR: process.cwd() },
   });
   if (stdioMode) releaseTerminal();
 
@@ -139,6 +151,13 @@ function start(extraArgs = []) {
   process.on("SIGINT", () => {
     child.kill("SIGINT");
   });
+
+  // Forward SIGTERM to the child (index.js). The headless SIGTERM handler
+  // that saves the session and prints the JSON result lives in index.js.
+  // Without this relay, sending SIGTERM to the launcher kills it without
+  // reaching the handler, and the run's data is lost. We forward and then
+  // let child.on("exit") keep us alive until the child actually finishes.
+  process.on("SIGTERM", () => child.kill("SIGTERM"));
 }
 
 start();

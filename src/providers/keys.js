@@ -4,10 +4,10 @@
 
 import { createCipheriv, createDecipheriv, randomBytes, pbkdf2Sync } from "node:crypto";
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
-import { homedir } from "node:os";
 import path from "node:path";
+import { homeStateDir } from "../data-dir.js";
 
-const FLINT_DIR = path.join(homedir(), ".flint");
+const FLINT_DIR = homeStateDir();
 const KEYS_FILE = path.join(FLINT_DIR, "keys.enc");
 
 // PBKDF2 iterations for key derivation (NIST-recommended minimum).
@@ -77,10 +77,17 @@ function loadKeysFile() {
   if (!existsSync(KEYS_FILE)) return {};
   try {
     return JSON.parse(readFileSync(KEYS_FILE, "utf-8"));
-  } catch {
+  } catch (err) {
+    // Silence here made a damaged file look like "no key configured", and the
+    // first-run wizard would then overwrite it without a word. Say it once.
+    if (!_warnedUnreadable) {
+      _warnedUnreadable = true;
+      process.stderr.write(`[keys] ${KEYS_FILE} cannot be read (${err.message}); treated as empty. Delete it and set the key again.\n`);
+    }
     return {};
   }
 }
+let _warnedUnreadable = false;
 
 function saveKeysFile(keys) {
   mkdirSync(FLINT_DIR, { recursive: true });

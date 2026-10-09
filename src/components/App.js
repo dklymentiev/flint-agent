@@ -4,6 +4,7 @@
 // that makes Ink's live output as tall as the window.
 import { freeUsedToday, savedFreeLimit } from "../free-models.js";
 import { config } from "../config.js";
+import { homeStateDir } from "../data-dir.js";
 import { getSpendLevel } from "../spend.js";
 import React from "react";
 import { Box, Text, useInput, useCursor } from "ink";
@@ -168,7 +169,6 @@ export function App({ store, onSubmit, onAbort, onQuit, onClipboard, onRecallQue
         const { hasKey } = await import("../providers/keys.js");
         const { getProvider } = await import("../providers/registry.js");
         const { readFileSync, existsSync } = await import("node:fs");
-        const { homedir } = await import("node:os");
         const { join, dirname } = await import("node:path");
         const { fileURLToPath } = await import("node:url");
         const { config } = await import("../config.js");
@@ -187,7 +187,7 @@ export function App({ store, onSubmit, onAbort, onQuit, onClipboard, onRecallQue
         if (item.id === "openrouter") {
           try {
             // homedir(), not process.env.HOME: HOME is unset on Windows.
-            const userPath = join(homedir(), ".flint", "models-curated.json");
+            const userPath = join(homeStateDir(), "models-curated.json");
             if (existsSync(userPath)) {
               const data = JSON.parse(readFileSync(userPath, "utf-8"));
               const prefixes = Array.isArray(data[item.id]) ? data[item.id] : [];

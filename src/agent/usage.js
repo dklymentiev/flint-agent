@@ -249,7 +249,10 @@ export function recordUsage(source, usage, pricing = null) {
     // silently understate the session, so mark the whole source as estimated.
     entry.calls += 1;
     entry.estimated = true;
-    return null;
+    // Still a delta for the live push: with no row the store never learns the
+    // call happened (calls count) nor that the cost is understated (estimated),
+    // and the end-of-turn merge that used to catch this is gone.
+    return { ...emptyEntry(), calls: 1, estimated: true };
   }
   const { cost, estimated } = priceUsage(u, pricing || pricingSource());
   entry.calls += 1;
@@ -265,7 +268,12 @@ export function recordUsage(source, usage, pricing = null) {
   if (runOpen) spend.run += cost;
 
   log.debug("usage", { source, promptTokens: u.promptTokens, cached: u.cachedTokens, cost, estimated });
-  return { ...u, cost, estimated };
+  // Return this single call as an entry in the by-source shape the store uses
+  // (see applyUsage), so the caller can push it live instead of waiting for the
+  // end-of-turn drain. `calls: 1` marks it as one call's delta, not the source's
+  // accumulated total — the ledger above still holds the running total for the
+  // budget gate and the turn receipt.
+  return { calls: 1, ...u, cost, estimated };
 }
 
 /**

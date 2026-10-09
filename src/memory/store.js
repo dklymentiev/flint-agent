@@ -3,7 +3,10 @@ import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import path from "node:path";
 import { config } from "../config.js";
 
-const MEMORY_DIR = path.join(config.projectRoot, "memory");
+const memoryRoot = process.env.FLINT_DATA_DIR
+  ? path.resolve(process.env.FLINT_DATA_DIR)
+  : config.projectRoot;
+const MEMORY_DIR = path.join(memoryRoot, "memory");
 const MEMORIES_FILE = path.join(MEMORY_DIR, "memories.jsonl");
 const HMAC_FILE = path.join(MEMORY_DIR, "memories.hmac");
 const KEY_FILE = path.join(MEMORY_DIR, ".hmac-key");

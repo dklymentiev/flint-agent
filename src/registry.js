@@ -4,11 +4,11 @@
  */
 
 import { readFileSync, writeFileSync, existsSync, mkdirSync, renameSync, unlinkSync } from "node:fs";
-import { homedir } from "node:os";
 import path from "node:path";
+import { homeStateDir } from "./data-dir.js";
 import { apiUrl } from "./api/address.js";
 
-const FLINT_DIR = path.join(homedir(), ".flint");
+const FLINT_DIR = homeStateDir();
 const REGISTRY_FILE = path.join(FLINT_DIR, "agents.json");
 
 function ensureDir() {

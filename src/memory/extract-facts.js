@@ -3,6 +3,7 @@
 
 import { stripTimeStamp } from "../agent/time-stamp.js";
 import { config } from "../config.js";
+import { createLogger } from "../logging/logger.js";
 import { chatCompletion } from "../api/client.js";
 
 const EXTRACTION_PROMPT = `You are a fact extractor. Given a conversation fragment, extract KEY FACTS that should be remembered.
@@ -19,7 +20,9 @@ Return ONLY valid JSON array:
 [{"content": "fact text", "category": "tech"}, ...]`;
 
 // Use a fast cheap model for extraction — don't waste main model tokens
-const EXTRACTION_MODEL = config.extractionModel;
+// Read per call (config.extractionModel), so a /model or /provider switch counts.
+const log = createLogger("extract-facts");
+let warned = false;
 
 export async function extractFacts(messages) {
   if (!messages?.length) return [];
@@ -70,7 +73,7 @@ export async function extractFacts(messages) {
       null,
       {
         source: "facts",
-        model: EXTRACTION_MODEL,
+        model: config.extractionModel,
         maxTokens: 1024,
         temperature: 0,
         stream: false,
@@ -92,7 +95,16 @@ export async function extractFacts(messages) {
         content: f.content.slice(0, 500),
         category: f.category || "auto",
       }));
-  } catch {
+  } catch (err) {
+    // A side call must not break the turn, but a model that 404s every time
+    // must not be invisible either: say so once per process.
+    if (!warned) {
+      warned = true;
+      log.warn(
+        `fact extraction failed with model ${config.extractionModel}: ${err?.message || err}. ` +
+          "Set EXTRACTION_MODEL or switch the model with /model.",
+      );
+    }
     return [];
   }
 }

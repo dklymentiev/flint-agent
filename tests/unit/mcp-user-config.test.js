@@ -23,6 +23,18 @@ beforeEach(() => { try { fs.unlinkSync(file); } catch {} });
 const write = (obj) => fs.writeFileSync(file, typeof obj === "string" ? obj : JSON.stringify(obj));
 
 describe("the user's MCP file", () => {
+  it("passes agent identity to MCP children without the model provider key", () => {
+    const env = mcp.mcpChildEnv({ MCP_OWN_KEY: "server-only" }, {
+      SN_AGENT_SLUG: "pebble", OPENROUTER_API_KEY: "model-only",
+      OPENAI_API_KEY: "model-only", ANTHROPIC_API_KEY: "model-only",
+    });
+    expect(env.SN_AGENT_SLUG).toBe("pebble");
+    expect(env.MCP_OWN_KEY).toBe("server-only");
+    expect(env.OPENROUTER_API_KEY).toBeUndefined();
+    expect(env.OPENAI_API_KEY).toBeUndefined();
+    expect(env.ANTHROPIC_API_KEY).toBeUndefined();
+  });
+
   it("is looked for in the data folder", () => {
     expect(mcp.userMcpConfigPath({ FLINT_DATA_DIR: dir })).toBe(file);
     expect(mcp.userMcpConfigPath({})).toBe(path.join(os.homedir(), ".flint", "mcp.json"));

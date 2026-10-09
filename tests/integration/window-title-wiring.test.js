@@ -66,6 +66,32 @@ describe("a turn animates the window title", () => {
     ).toMatch(/[⛭✲]/);
   });
 
+  // setTask() is covered in the unit suite, and so was nothing that calls it:
+  // with the call removed from processMessage the title of every turn read
+  // "Flint agent - working" and all tests were green. Same shape as the rest
+  // of this file: a correct module that nothing calls.
+  it("names what was asked: the first words of the request are in the title", async () => {
+    const promptAttention = await import("../../src/ui/prompt-attention.js");
+    vi.spyOn(promptAttention, "defaultSetTitle").mockImplementation(sink.spy);
+
+    // The title is redrawn on its tick, so the turn has to last longer than
+    // one tick (500 ms) for the task to be seen in it.
+    const agent = await import("../../src/agent/agent.js");
+    vi.spyOn(agent, "runAgent").mockImplementation(
+      () => new Promise((_, reject) => setTimeout(() => reject(new Error("probe: model unavailable")), 1300)),
+    );
+
+    const { processMessage } = await import("../../src/message-handler.js");
+    await processMessage("rename the invoices table", null).catch(() => {});
+
+    const spinning = sink.written.filter((t) => /[⛭✲]/.test(t));
+    expect(spinning.length, "no spinner title was written").toBeGreaterThan(0);
+    expect(
+      spinning.some((t) => t.includes("rename the invoices")),
+      `no title names the request: ${JSON.stringify(spinning)}`,
+    ).toBe(true);
+  });
+
   // Owner, 2026-10-02: after turns stopped with Esc the title kept spinning on
   // an idle Flint. Only the normal end of a turn stopped the animation, so every
   // turn that ended another way left its timer running for good.

@@ -1,7 +1,6 @@
 // Fetch models from provider API — unified format
 
 import { getProvider } from "./registry.js";
-import { getKey } from "./keys.js";
 import { createLogger } from "../logging/logger.js";
 
 const log = createLogger("models");
@@ -26,7 +25,12 @@ export async function fetchModels(providerId) {
     return [];
   }
 
-  const apiKey = await getKey(providerId);
+  // Use the resolved key from config (which already honours the headless
+  // env-key-wins rule) rather than calling getKey() directly.  Calling
+  // getKey() here bypasses config.resolveApiKey() and would silently use a
+  // stored key even when the environment key should win in headless mode.
+  const { config } = await import("../config.js");
+  const apiKey = config.apiKey;
 
   try {
     const headers = { ...provider.headers };

@@ -54,7 +54,14 @@ Its guards lower the risk; they are not a sandbox. Known limits, not bugs:
 - **Paths.** The path guard protects Flint's own source, its permission file,
   a list of secret folders and the operating system's folders, and `AGENT_ALLOWED_PATHS` narrows the rest. It
   is not an operating system boundary: run Flint in a container or a virtual
-  machine when that is what you need.
+  machine when that is what you need. The same radius extends to shell commands
+  (`run_command`, `run_background_command`): literal paths that appear in the
+  command text — redirections (`echo x > /etc/passwd`), `cd`, `git -C`, and
+  file arguments to commands like `cat` or `rm` — are rejected if they fall
+  outside the allowed directories. The check is static: it cannot see paths
+  assembled from shell variables (`$VAR`), command substitution (`$(cmd)`),
+  or glob patterns. For full isolation, use a container or a dedicated OS
+  user.
 - **Keys at rest.** API keys are encrypted (AES-256-GCM, with DPAPI on
   Windows), which keeps them out of plain files and backups. Any program
   running as the same user can still decrypt them.

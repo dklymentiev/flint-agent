@@ -8,30 +8,51 @@
 //
 // The vitest config sets HOME and USERPROFILE to the sandbox path.  This
 // setupFile verifies that worked, and throws if it did not.
+//
+// FLINT_DATA_DIR is deliberately NOT set in the test environment. When it
+// is set, homeStateDir() returns that path and bypasses os.homedir()
+// entirely, which breaks every test that mocks os.homedir() or sets
+// HOME/USERPROFILE to its own temp dir (agent-registry, api-pairing,
+// headless-no-key-persist, mcp-user-config, mcp-secrets, test-runner-guard).
+// By leaving FLINT_DATA_DIR unset, homeStateDir() falls through to
+// os.homedir() (driven by HOME/USERPROFILE), which tests can intercept or
+// override individually.  Per-worker isolation is provided by giving each
+// worker its own HOME (see worker-home below), not by FLINT_DATA_DIR.
+//
+// The sqlite-store guard (src/memory/sqlite-store.js) checks that HOME is a
+// sandbox temp dir, not the real machine home.
 
 import os from "node:os";
 import path from "node:path";
 import { existsSync, mkdirSync } from "node:fs";
 
-// The expected sandbox is whatever HOME was set to by the vitest config.
-// We do NOT re-derive it from a relative path, because integration tests
-// change cwd (isolated-cwd.js) which would make path.resolve() diverge.
-const EXPECTED_HOME = process.env.HOME;
-
-// One data folder per vitest worker. The config makes one FLINT_DATA_DIR for
-// the whole run, and the workers run test files in parallel, so the memory
+// One home directory per vitest worker. The config makes one HOME for the
+// whole run, and the workers run test files in parallel, so the memory
 // database (sqlite-store, skills, facts, patterns) was one file open in
 // several processes at once: "SqliteError: disk I/O error" on the Windows CI
 // runners, and rows one file inserted wiped by another file's cleanup
 // (sqlite-store reflections failing in a full run, passing alone; 2026-10-02).
-// A worker runs one file at a time, so its own folder is enough.
-if (process.env.VITEST === "true" && process.env.FLINT_DATA_DIR && process.env.VITEST_POOL_ID) {
-  process.env.FLINT_TEST_DATA_BASE ||= process.env.FLINT_DATA_DIR;
-  process.env.FLINT_DATA_DIR = path.join(process.env.FLINT_TEST_DATA_BASE, `worker-${process.env.VITEST_POOL_ID}`);
-  mkdirSync(process.env.FLINT_DATA_DIR, { recursive: true });
+// A worker runs one file at a time, so its own home is enough.
+if (process.env.VITEST === "true" && process.env.VITEST_POOL_ID) {
+  const baseHome = path.resolve(process.env.HOME || os.homedir());
+  const workerHome = path.join(baseHome + "-worker", `worker-${process.env.VITEST_POOL_ID}`);
+  mkdirSync(workerHome, { recursive: true });
+  process.env.HOME = workerHome;
+  process.env.USERPROFILE = workerHome;
+}
+
+// FLINT_DATA_DIR must be unset for UNIT TESTS so homeStateDir() falls through
+// to homedir(). Some setupFiles or earlier imports may have set it; clear it
+// for unit tests only — integration tests spawn child processes that need
+// FLINT_DATA_DIR inherited from the parent env (they use --data-dir CLI which
+// cli.js parses into FLINT_DATA_DIR, but config.js is imported before parseCLI
+// runs, so the child needs FLINT_DATA_DIR already set).
+if (process.env.FLINT_TEST_MODE === "unit") {
+  delete process.env.FLINT_DATA_DIR;
 }
 
 const home = os.homedir();
+const EXPECTED_HOME = process.env.HOME;
 
 if (process.env.VITEST === "true" && EXPECTED_HOME) {
   // The sandbox must be active.  If homedir() returns something else,

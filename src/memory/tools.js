@@ -43,8 +43,8 @@ export const tools = [
       parameters: {
         type: "object",
         properties: {
-          id: { type: "integer", description: "Memory ID to retrieve" },
-          last: { type: "integer", description: "Get last N memories instead" },
+          id: { type: "integer", minimum: 1, description: "Positive memory ID to retrieve; omit when listing recent memories" },
+          last: { type: "integer", minimum: 1, description: "Number of recent memories to list; takes precedence over id" },
         },
       },
     },
@@ -146,12 +146,13 @@ export const handlers = {
   },
 
   memory_get(args) {
-    if (args.id != null) {
+    const recentCount = Number.isInteger(args.last) && args.last > 0 ? args.last : null;
+    if (recentCount === null && Number.isInteger(args.id) && args.id > 0) {
       const m = getMemory(args.id);
       if (!m) return `Memory #${args.id} not found.`;
       return `[#${m.id}] (${m.category}) ${m.created_at}: ${m.content} [importance: ${m.importance}]`;
     }
-    const recent = listRecentMemories(args.last ?? 5);
+    const recent = listRecentMemories(recentCount ?? 5);
     if (!recent.length) return "No memories stored yet.";
     return recent.map((m) => `[#${m.id}] (${m.category}) ${m.created_at?.slice(0, 10)}: ${m.content}`).join("\n");
   },

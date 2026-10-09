@@ -1,6 +1,11 @@
-// First: in the stdio mode it moves every stray write off stdout before any
+// Before everything: --data-dir becomes FLINT_DATA_DIR, so no module computes
+// a path from the old value (data-dir-flag.js).
+import "./data-dir-flag.js";
+// Then: in the stdio mode it moves every stray write off stdout before any
 // other module can print (stdio/guard.js).
 import { stdioArgs, protocolWrite } from "./stdio/guard.js";
+// --help answers before any module that does work at load time (early-flags.js).
+import "./early-flags.js";
 // `node src/index.js --version`: the version, and nothing started.
 if (process.argv.includes("--version") || process.argv.includes("-v")) {
   const { readFileSync: readPkg } = await import("node:fs");
@@ -40,22 +45,20 @@ process.on("SIGINT", () => {
 
 // Startup watchdog: if app doesn't finish init within 30s, exit. Paused while
 // a first-run question waits for the operator (see startup-watchdog.js).
+import { fakeStdinTTY, stdinIsRealTTY, noTerminalSetupRefusal, watchForEmptyInput, NO_INPUT_MESSAGE } from "./tty.js";
 import { startStartupWatchdog, clearStartupWatchdog, whileWaitingForOperator } from "./startup-watchdog.js";
 startStartupWatchdog();
 
 // Patch stdin only when truly needed (non-TTY fallback for piped/CI). Not in
 // the stdio mode: there stdin is the protocol, and a stdin that claims to be
 // a terminal would make the first-run questions wait on it.
-if (!process.stdin.isTTY && !stdioArgs) {
-  if (!process.stdin.setRawMode) process.stdin.setRawMode = () => process.stdin;
-  if (!process.stdin.ref) process.stdin.ref = () => process.stdin;
-  if (!process.stdin.unref) process.stdin.unref = () => process.stdin;
-  process.stdin.isTTY = true;
-}
+// The stand-in is marked (tty.js): the first-run questions must not trust it.
+if (!process.stdin.isTTY && !stdioArgs) fakeStdinTTY();
 
 import React from "react";
 import { render } from "ink";
 import { config, needsFirstRunSetup } from "./config.js";
+import { trackTempFile } from "./temp-tracker.js";
 import { store } from "./store/index.js";
 import { app, sessionData } from "./app-state.js";
 import { parseCLI, runListSessions, migrateKeys, runFirstRunSetup } from "./cli.js";
@@ -70,6 +73,8 @@ import { initCommands, tryHandleCommand, isSlashCommand } from "./commands/regis
 import { setSupervisorEnabled } from "./agent/supervisor.js";
 import { runAutoMode } from "./agent/auto.js";
 import { initPermissions, bulkSetPermission } from "./tools/permissions.js";
+import { startHeadless, prepareHeadless, headlessSetupRefusal } from "./headless-start.js";
+import { buildHeadlessResult, modifiedFilesIn, runTotals, createHeadlessRun, gitChangesIn, installHeadlessSignals } from "./headless-run.js";
 import { carriedBulkPermission } from "./restart.js";
 import { initSecurity } from "./security/index.js";
 import { fetchModelInfo } from "./api/client.js";
@@ -79,6 +84,7 @@ import { createChatLogFollower } from "./logging/chat-log-follower.js";
 import { setInkActive, createLogger } from "./logging/logger.js";
 import { startLogCollector } from "./logging/log-collector.js";
 import { killAllChildren } from "./tools/system.js";
+import { killAllChildrenSync } from "./tools/process-tools.js";
 import { pushInbox } from "./memory/inbox.js";
 import { getActiveGoal, getTaskStats, syncPlanToStore, abandonGoal, getDueReminders, fireReminder, claimTask, getTask as getTaskById, completeTaskWithResult, gcStaleSessions } from "./tasks/queries.js";
 import { closeDb } from "./tasks/db.js";
@@ -105,19 +111,75 @@ const pkg = JSON.parse(readFileSync(new URL("../package.json", import.meta.url),
 
 const cli = stdioArgs ? { action: "stdio", ...stdioArgs } : parseCLI();
 
+// Nobody is at the keyboard in a headless run, and the run belongs in --cwd.
+// Both have to be settled here, before anything below can ask a question or
+// read the working directory: the flag used to be set in the headless block
+// near the end of this file, after bootstrap() had already drawn the first-run
+// menu and frozen the install directory into the system message.
+// bootstrap() repeats this call as its own first step; see prepareHeadless.
+prepareHeadless(cli);
+
 if (cli.action === "list") {
   await runListSessions();
 }
 
 // -- Auto-migrate env keys + first-run wizard --
 
-await migrateKeys();
-if (needsFirstRunSetup && cli.action !== "list" && cli.action !== "stdio") {
+// A host gives stdio credentials for this process only. Importing them into
+// ~/.flint/keys.enc would make a per-turn secret persist under the agent user.
+if (cli.action !== "stdio") await migrateKeys();
+{
+  // The key wizard reads stdin. A headless run has nobody to type into it.
+  const refusal = headlessSetupRefusal(cli, needsFirstRunSetup);
+  if (refusal) {
+    process.stderr.write(refusal + "\n");
+    process.exit(1);
+  }
+}
+{
+  // The wizard reads stdin. With no terminal it would wait for ever (the
+  // startup watchdog is lifted while it waits), so say what is missing instead.
+  const refusal = noTerminalSetupRefusal(cli, needsFirstRunSetup, stdinIsRealTTY());
+  if (refusal) {
+    process.stderr.write(refusal + "\n");
+    process.exit(1);
+  }
+}
+if (needsFirstRunSetup && cli.action !== "list" && cli.action !== "stdio" && cli.action !== "check") {
   await whileWaitingForOperator(() => runFirstRunSetup(cli));
 }
 
 // Resolve API key from encrypted storage
-await config.resolveApiKey();
+await config.resolveApiKey({ preferEnv: cli.action === "stdio" });
+
+// -- Headless mode: set unattended flag BEFORE bootstrap so permissions
+// use the 0-timeout path instead of the 600 s timer.
+let headlessRun = null;
+if (cli.action === "headless") {
+  startHeadless({ cwd: cli.cwd });
+
+  // The run and its signal handlers exist BEFORE bootstrap and before the
+  // task block near the end of this file. The general gracefulShutdown() and
+  // its handlers are defined after that block and never reached by a headless
+  // run. A signal stops the run (headless-run.js): the turn in flight is
+  // aborted, or no turn starts if none has yet; the session is saved, the
+  // record is written with stop_reason "killed", and the process exits 2.
+  headlessRun = createHeadlessRun({
+    app,
+    processMessage,
+    saveSession: () => saveSession(store.getState().sessionId, sessionData(store)),
+    buildResult: (stopReason, result) => headlessResult(stopReason, result),
+    gitChanges: () => gitChangesIn(config.workdir),
+    write: (text, flushed) => process.stdout.write(text, flushed),
+    exit: (code) => process.exit(code),
+    logError: (line) => process.stderr.write(line),
+    killChildren: killAllChildrenSync,
+  });
+  installHeadlessSignals(process, headlessRun);
+  process.on("exit", () => {
+    if (!app.shuttingDown) killAllChildrenSync();
+  });
+}
 
 // Free mode survives a restart when its primary is still the model
 // (docs/free-mode.md); its notices go to the console.
@@ -132,16 +194,27 @@ await config.resolveApiKey();
 // Set provider in store
 store.setState({ provider: config.provider });
 
+// One folder for every file tool, in every mode: the folder Flint was started
+// from. Relative reads, writes, searches and shell commands all use it, as an
+// agent CLI would. Writes used to go to a per-session workspace while reads and
+// searches looked in Flint's own install folder, so the agent could not read
+// what it had just written (a test agent could not find junk.txt beside its own
+// CLAUDE.md, 2026-10-02; a tester's data.csv, 2026-10-08). The launcher passes
+// the real start folder because it runs this process from the install folder.
+{
+  // A headless --cwd already chose its folder in prepareHeadless() above: keep it.
+  const launchDir = process.env.FLINT_LAUNCH_DIR || process.cwd();
+  if (!config.workdirBase) config.workdirBase = config.baseDir || launchDir;
+  if (!config.baseDir) config.baseDir = launchDir;
+}
+
 // -- stdio mode: the host's instructions and MCP servers, before bootstrap
 // builds the system prompt and connects the servers --
+// Headless mode's host identity (instructions + .mcp.json from --cwd) is
+// handled in bootstrap(), so it works for direct callers too.
 if (cli.action === "stdio") {
   const { hostPromptFrom, mcpConfigPath } = await import("./stdio/session.js");
   const { mcpJsonServers, parseServerConfig } = await import("./mcp-client.js");
-  // Paths are the agent's folder's, as an agent CLI would: relative reads and
-  // writes land there, not in a per-session workspace (a test agent could not
-  // find junk.txt beside its own CLAUDE.md, 2026-10-02).
-  if (!config.workdirBase) config.workdirBase = process.cwd();
-  config.baseDir = process.cwd();
   try {
     app.hostPrompt = hostPromptFrom(cli);
     const mcpFile = mcpConfigPath(cli);
@@ -150,8 +223,7 @@ if (cli.action === "stdio") {
       config.mcpServers = [...parseServerConfig(config.mcpServers), ...fromFile];
     }
   } catch (err) {
-    process.stderr.write(`[flint] ${err.message}
-`);
+    process.stderr.write(`[flint] ${err.message}\n`);
     process.exit(2);
   }
 }
@@ -203,6 +275,96 @@ if (cli.action === "stdio") {
   clearStartupWatchdog();
   const { runStdio } = await import("./stdio/run.js");
   await runStdio({ opts: cli, write: protocolWrite, version: pkg.version });
+}
+
+// -- Headless mode: skip UI, run task, exit --
+// The structured JSON result a headless caller reads to learn what happened in
+// the run (headless-run.js builds it). `stopReason` is "done", "time" or
+// "killed". Every number is this run's: the session totals now, minus what
+// they were when the task started. The folder is config.workdir, the one the
+// file tools and auto-verify use.
+function headlessResult(stopReason, fromResult) {
+  return buildHeadlessResult({
+    stopReason,
+    result: fromResult,
+    state: store.getState(),
+    baseline: headlessBaseline,
+    durationMs: Date.now() - headlessStartTime,
+    model: config.model,
+    modifiedFiles: modifiedFilesIn(config.workdir),
+  });
+}
+
+if (cli.action === "headless") {
+  clearStartupWatchdog();
+  if (!cli.task) {
+    process.stderr.write("[headless] --task is required\n");
+    process.exit(1);
+  }
+  // Apply budget override for headless mode
+  if (cli.budget) { config.maxCostPerAction = cli.budget; }
+  // Wall-clock start of the headless run, captured before any work so the
+  // result's duration_ms reflects the true elapsed time regardless of how the
+  // run ends (normal, time limit, or external kill). var (not const) because
+  // headlessResult, defined above the if-block, closes over it.
+  var headlessStartTime = Date.now();
+  // What the session had already spent and called before this task: nothing
+  // for a new session, the earlier runs for a resumed one (--session).
+  var headlessBaseline = runTotals(store.getState());
+  // Wall-clock time limit for headless runs (seconds). When set, a timer
+  // aborts the agent loop if it runs past this many seconds, so a hung model
+  // call or runaway tool call cannot run forever in CI or a bench subject.
+  if (cli.timeLimit) { config.timeLimit = cli.timeLimit; }
+  // Redirect store output to stderr (stdout reserved for structured result)
+  const _origAddLine = store.getState().addLine.bind(store.getState());
+  store.getState().addLine = (text) => {
+    const raw = typeof text === "string" ? text.replace(/\x1b\[[0-9;]*m/g, "") : String(text);
+    if (raw.trim()) process.stderr.write(raw.trim() + "\n");
+    return _origAddLine(text);
+  };
+  // The task, the auto-verify retry and the time limit: headless-run.js. It
+  // ends the process itself, on every path.
+  await headlessRun.run({ task: cli.task, timeLimitSec: config.timeLimit });
+  // The exit happens when stdout has taken the record. Nothing below this
+  // block is for a headless run (it starts the console), so wait here.
+  await new Promise(() => {});
+}
+
+// -- Check mode: minimal runtime probe (--check) --
+//
+// Verifies three things in seconds and a fraction of a cent, without the setup
+// a full --headless run needs: (1) an API key is present, (2) the model
+// answers, (3) a tool call round-trips. The probe itself is check-probe.js.
+if (cli.action === "check") {
+  clearStartupWatchdog();
+  const { CHECK_TASKS } = await import("./model-check.js");
+  const { runCheckProbe } = await import("./check-probe.js");
+  const { chatCompletion } = await import("./api/client.js");
+  const { processToolDefs } = await import("./tools/process-tools.js");
+  const { executeToolWithPermissions } = await import("./tools/permissions.js");
+
+  // The command the model asks for runs the way a headless run's commands do:
+  // tools allowed, nobody to answer a prompt, so whatever a guard wants
+  // confirmed is refused (permissions.js).
+  startHeadless();
+
+  const outcome = await runCheckProbe({
+    task: CHECK_TASKS.find((t) => t.id === "run-command"),
+    hasKey: !!config.apiKey,
+    chat: (messages) => chatCompletion(messages, processToolDefs, null, { timeoutMs: 15000, stream: false }),
+    runTool: async (name, args) => {
+      const r = await executeToolWithPermissions(name, args, { sessionId: store.getState().sessionId || "" });
+      return { content: typeof r.result === "string" ? r.result : JSON.stringify(r.result), denied: !!r.denied };
+    },
+    dir: process.cwd(),
+    provider: config.provider,
+    model: config.model,
+  });
+  // A command tool can leave a process behind (run_background_command).
+  killAllChildrenSync();
+  if (outcome.stderr) process.stderr.write(outcome.stderr);
+  if (outcome.stdout) process.stdout.write(outcome.stdout);
+  process.exit(outcome.code);
 }
 
 // -- Start ink UI --
@@ -289,13 +451,24 @@ if (process.send) {
 }
 
 // Clear entire screen (remove launcher splash) before Ink takes over
-if (cli.action !== "headless") {
+if (cli.action !== "headless" && cli.action !== "check") {
   process.stdout.write("\x1b[2J\x1b[3J\x1b[H");
 }
-const inkInstance = cli.action !== "headless" ? render(h(App, { store, onSubmit: handleInput, onAbort: handleAbort, onQuit: () => gracefulShutdown("ctrl-c"), onClipboard: readClipboardForInput, onRecallQueued: recallQueuedInput }), RENDER_OPTIONS) : null;
+const inkInstance = cli.action !== "headless" && cli.action !== "check"
+  ? render(h(App, { store, onSubmit: handleInput, onAbort: handleAbort, onQuit: () => gracefulShutdown("ctrl-c"), onClipboard: readClipboardForInput, onRecallQueued: recallQueuedInput }), RENDER_OPTIONS)
+  : null;
 if (inkInstance) {
   setInkActive(true); // suppress stderr writes that corrupt Ink layout
   store.setState({ _inkClear: () => inkInstance.clear() });
+}
+if (inkInstance && cli.action !== "stdio" && !stdinIsRealTTY()) {
+  watchForEmptyInput({
+    onEmpty: () => {
+      try { inkInstance.unmount(); } catch { /* already gone */ }
+      process.stderr.write(NO_INPUT_MESSAGE + String.fromCharCode(10));
+      process.exit(1);
+    },
+  });
 }
 if (mcpConfigProblem) {
   if (inkInstance) printWarning(mcpConfigProblem);
@@ -447,7 +620,7 @@ function readClipboardForInput() {
   if (!clip) return null;
   if (clip.type !== "image") return { type: "text", data: clip.data };
   const path = `${os.tmpdir()}/flint_clipboard_${Date.now()}.png`;
-  try { writeFileSync(path, Buffer.from(clip.data, "base64")); } catch {}
+  try { writeFileSync(path, Buffer.from(clip.data, "base64")); trackTempFile(path); } catch {}
   const pasted = store.getState().pastedImages;
   const index = pasted.length + 1;
   store.setState({ pastedImages: [...pasted, { path, timestamp: Date.now(), index }] });
@@ -606,6 +779,7 @@ async function handleInput(input, opts = {}) {
         const { mkdirSync, writeFileSync } = await import("node:fs");
         // tmpdir already exists
         writeFileSync(imgPath, Buffer.from(clip.data, "base64"));
+        trackTempFile(imgPath);
       } catch {}
       const pastedImages = store.getState().pastedImages;
       const imgIndex = pastedImages.length + 1;
@@ -635,6 +809,7 @@ async function handleInput(input, opts = {}) {
           const { mkdirSync, writeFileSync } = await import("node:fs");
           // tmpdir already exists
           writeFileSync(tmpPath, clip.data, "utf-8");
+          trackTempFile(tmpPath);
         } catch (e) {
           store.getState().addLine(chalk.red(` Failed to save clipboard: ${e.message}`));
           return;
@@ -777,9 +952,10 @@ try {
   }
 } catch {}
 
-// -- Start HTTP server --
+if (cli.action !== "headless") {
+  // -- Start HTTP server (only for interactive and stdio modes) --
 
-const serverResult = startServer(config.port, store, async (content, name, sender) => {
+  const serverResult = startServer(config.port, store, async (content, name, sender) => {
   // All API messages go through bus — drain loop processes them
   const { id: busId } = bus.push({ channel: "api", content, priority: bus.PRIORITY.API, source: sender || name, sessionId: store.getState().sessionId });
   busPush(); // notify drain loop
@@ -917,18 +1093,19 @@ if (serverResult && typeof serverResult.then === "function") {
   store.setState({ _port: app.actualPort });
 }
 
-// -- Is there a newer Flint? (docs/self-update.md) --
-// In the background, at most once a day, never in the headless mode; one
-// line when there is. FLINT_UPDATE_CHECK=0 turns it off.
-if (cli.action !== "headless" && process.env.FLINT_UPDATE_CHECK !== "0") {
-  setTimeout(async () => {
+  // -- Is there a newer Flint? (docs/self-update.md) --
+  // In the background, at most once a day, never in the headless mode; one
+  // line when there is. FLINT_UPDATE_CHECK=0 turns it off.
+}
+  if (cli.action !== "headless" && process.env.FLINT_UPDATE_CHECK !== "0") {
+    setTimeout(async () => {
     try {
       const { checkForUpdate, installKind, updateNotice } = await import("./update.js");
-      const dataDir = process.env.FLINT_DATA_DIR || (await import("node:path")).join(os.homedir(), ".flint");
+      const dataDirPath = (await import("./data-dir.js")).homeStateDir();
       const root = config.projectRoot;
       const check = await checkForUpdate({
         root, current: pkg.version, kind: installKind(root),
-        cacheFile: (await import("node:path")).join(dataDir, "update-check.json"),
+        cacheFile: path.join(dataDirPath, "update-check.json"),
       });
       const notice = updateNotice(check);
       if (notice) store.getState().addLine(chalk.yellow(`  ${notice}`));
@@ -949,67 +1126,6 @@ startLogCollector();
 const CLEANUP_INTERVAL = parseInt(process.env.AGENT_CLEANUP_INTERVAL_MIN || "60", 10) * 60000;
 store.getState().registerTimer({ id: "log-collector", name: "Log collector", intervalMs: CLEANUP_INTERVAL });
 store.getState().registerTimer({ id: "schedule-watcher", name: "Schedule watcher", intervalMs: 30000 });
-
-// -- Headless mode: skip UI, run task, exit --
-if (cli.action === "headless") {
-  clearStartupWatchdog();
-  config.headless = true;
-  bulkSetPermission("allow");  // auto-approve all tools in headless mode
-  if (cli.cwd) {
-    try { process.chdir(cli.cwd); } catch (e) {
-      process.stderr.write("[headless] Cannot chdir to " + cli.cwd + ": " + e.message + "\n");
-      process.exit(1);
-    }
-    // Route filesystem WRITE tools to the target cwd instead of the default
-    // session workspace. Without this, `write_file`/`edit_file` end up in
-    // .../sessions/<ts>/workspace/ and the `--cwd` dir is untouched — which
-    // breaks headless workflows like SWE-bench that need the agent to edit
-    // an external checkout.  See filesystem.js:resolveWritePath.
-    config.workdir = cli.cwd;
-    config.projectRoot = cli.cwd;
-  }
-  if (!cli.task) {
-    process.stderr.write("[headless] --task is required\n");
-    process.exit(1);
-  }
-  // Apply budget override for headless mode
-  if (cli.budget) { config.maxCostPerAction = cli.budget; }
-  // Redirect store output to stderr (stdout reserved for structured result)
-  const _origAddLine = store.getState().addLine.bind(store.getState());
-  store.getState().addLine = (text) => {
-    const raw = typeof text === "string" ? text.replace(/\x1b\[[0-9;]*m/g, "") : String(text);
-    if (raw.trim()) process.stderr.write(raw.trim() + "\n");
-    return _origAddLine(text);
-  };
-  try {
-    let result = await processMessage(cli.task, null);
-
-    // Auto-verify: if no files changed, give agent one more chance
-    try {
-      const diff = execSync("git diff --stat 2>/dev/null", { encoding: "utf-8", timeout: 5000 }).trim();
-      if (!diff && result.text && !result.text.includes("Budget limit")) {
-        result = await processMessage(
-          "Your previous edit produced NO changes (git diff is empty). " +
-          "edit_file likely failed due to wrong old_text. " +
-          "Re-read the file, find the exact text, and try again.",
-          null
-        );
-      }
-    } catch {}
-    const output = {
-      response: result.text || "",
-      cost: result.stats?.cost || 0,
-      tokens: (result.stats?.promptTokens || 0) + (result.stats?.completionTokens || 0),
-    };
-    process.stdout.write(JSON.stringify(output) + "\n");
-    process.exit(0);
-  } catch (err) {
-    process.stderr.write("[headless] Error: " + err.message + "\n");
-    process.exit(1);
-  }
-}
-
-// printHeader() already called before Ink render
 
 // -- Message Bus: setup; this session's half-done messages back, leftovers of
 // earlier runs expired (see prepareQueueAtStart) --

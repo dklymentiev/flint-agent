@@ -3,8 +3,10 @@
 //
 // One process is one session. Each `user` line on stdin is one turn; turns
 // run one at a time, in order. While a turn runs, its model replies and tool
-// results are written to stdout as they happen, and the turn ends with one
-// `result` line. A `control_request` with subtype "interrupt" stops the
+// results and visible text deltas are written to stdout as they happen, and
+// the turn ends with one `result` line. A `control_request` with subtype
+// "steer" is injected before the next model call in the active turn. An
+// "interrupt" stops the
 // running turn, which then ends with a `result` of subtype
 // "error_during_execution". The process stays up
 // between turns and exits when stdin closes, after the running turn.

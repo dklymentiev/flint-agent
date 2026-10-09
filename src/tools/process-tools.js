@@ -13,6 +13,209 @@ import {
 // ── Child process registry for graceful shutdown ──
 export const activeChildren = new Map(); // procId → ChildProcess
 
+/**
+ * Check a shell command against the AGENT_ALLOWED_PATHS radius.
+ * Returns an error string if the cwd or any literal path in the command
+ * is outside the allowed directories, or null if the command is allowed.
+ *
+ * This is the single shared check used by both run_command and
+ * run_background_command — delete this function's call site and both
+ * handlers go unguarded.
+ *
+ * The radius is not complete: paths assembled from shell variables ($VAR),
+ * command substitution ($(cmd), backticks), or glob patterns are not
+ * visible. For real isolation use a container or a dedicated OS user.
+ */
+
+/**
+ * Normalise a path for comparison: resolve to absolute, convert backslashes
+ * to forward slashes, and lowercase on Windows (where the filesystem is
+ * case-insensitive for drive and directory names). On Linux the comparison
+ * stays case-sensitive.
+ *
+ * This exists because startsWith("C:\\Projects", "c:/projects") returns
+ * false on Windows even though they are the same directory — the drive letter
+ * case and the slash direction differ, and Windows treats both the drive
+ * letter and the directory components as case-insensitive.
+ */
+function normalisePathForCompare(p) {
+  const resolved = path.resolve(p).replace(/\\/g, "/");
+  return process.platform === "win32" ? resolved.toLowerCase() : resolved;
+}
+
+/**
+ * True when `target` is the same as or inside `dir`, on every platform.
+ * Both arguments are normalised (see normalisePathForCompare) before
+ * comparison, so on Windows "C:\\Projects" and "c:/projects" match.
+ */
+function pathIsInside(target, dir) {
+  const normTarget = normalisePathForCompare(target);
+  const normDir = normalisePathForCompare(dir);
+  return normTarget === normDir || normTarget.startsWith(normDir.endsWith("/") ? normDir : normDir + "/");
+}
+
+export { pathIsInside };
+
+export function checkShellPathRadius(command, cwd) {
+  if (!config.allowedPaths?.length) return null;
+
+  const ok = config.allowedPaths.some((dir) => pathIsInside(cwd, dir));
+  if (!ok) return `Error: working directory "${cwd}" is outside allowed paths`;
+
+  const cmdPaths = extractCommandPaths(command, cwd);
+  for (const p of cmdPaths) {
+    const resolved = path.resolve(p);
+    const inside = config.allowedPaths.some((dir) => pathIsInside(resolved, dir));
+    if (!inside) {
+      return `Error: command references path "${resolved}" outside allowed paths [${config.allowedPaths.join(", ")}]`;
+    }
+  }
+  return null;
+}
+
+export function extractCommandPaths(cmd, cwd) {
+  const results = [];
+  const allowed = [];
+  const dollarSign = String.fromCharCode(36);
+
+  const tokens = [];
+  {
+    const SEP = /[\s]/;
+    let i = 0;
+    while (i < cmd.length) {
+      const ch = cmd[i];
+      if (SEP.test(ch)) { i++; continue; }
+      const metaMatch = cmd.slice(i).match(/^(&&|\|\||;|\|)/);
+      if (metaMatch) {
+        tokens.push({ raw: metaMatch[1], op: true });
+        i += metaMatch[1].length;
+        continue;
+      }
+      if (ch === '>') {
+        const isAppend = cmd[i + 1] === '>';
+        tokens.push({ raw: isAppend ? ">>" : ">", op: true });
+        i += isAppend ? 2 : 1;
+        continue;
+      }
+      if (ch === '<') {
+        tokens.push({ raw: "<", op: true });
+        i++;
+        continue;
+      }
+      if ((ch === '2' || ch === '1') && cmd[i + 1] === '>') {
+        i += 2;
+        continue;
+      }
+      if (ch === '"' || ch === "'") {
+        const q = ch;
+        let j = i + 1;
+        let buf = "";
+        while (j < cmd.length && cmd[j] !== q) {
+          // In single quotes, backslash is literal (bash behavior).
+          // In double quotes, backslash escapes the next char.
+          if (ch === '"' && cmd[j] === '\\' && j + 1 < cmd.length) { buf += cmd[j + 1]; j += 2; }
+          else { buf += cmd[j]; j++; }
+        }
+        if (j < cmd.length) j++;
+        tokens.push({ raw: buf, quoted: true });
+        i = j;
+        continue;
+      }
+      // Variable references: $VAR, ${VAR}, $(cmd) — read the whole thing
+      // as one token and skip it (the radius can't resolve dynamic paths).
+      if (ch === dollarSign) {
+        let j = i + 1;
+        if (cmd[j] === "{") {
+          // ${...}
+          j++;
+          while (j < cmd.length && cmd[j] !== "}") j++;
+          if (j < cmd.length) j++;
+        } else {
+          // $VARNAME
+          while (j < cmd.length && /[a-zA-Z_]/.test(cmd[j])) j++;
+        }
+        if (j > i) { i = j; continue; }
+        i++; // lone $
+        continue;
+      }
+      // Unquoted token — read until whitespace, metachar, >, <, or $
+      let j = i;
+      let buf = "";
+      while (j < cmd.length && !SEP.test(cmd[j])
+        && !/^(&&|\|\||;|\|)/.test(cmd.slice(j))
+        && cmd[j] !== '>' && cmd[j] !== '<' && cmd[j] !== dollarSign) {
+        buf += cmd[j]; j++;
+      }
+      if (buf.length > 0) tokens.push({ raw: buf, quoted: false });
+      i = j;
+    }
+  }
+
+  for (let idx = 0; idx < tokens.length; idx++) {
+    const tok = tokens[idx];
+    if (!tok.quoted || tok.raw.length < 2) continue;
+    const prev = tokens[idx - 1];
+    const prev2 = tokens[idx - 2];
+    if (prev && prev.raw === "-c" && prev2 && prev2.raw) {
+      if (/^(bash|sh)$/.test(prev2.raw) || prev2.raw.includes("/bin/")) {
+        const nested = extractCommandPaths(tok.raw, cwd);
+        for (const p of nested) {
+          if (results.indexOf(p) === -1) results.push(p);
+        }
+        tokens.splice(idx - 2, 2);
+      }
+    }
+  }
+
+  const pathLikeRe = /^(\/|~|[a-zA-Z]:[\\/])|(\/\.\/|\.\.\\|\.\/|\.\.\/)/;
+
+  let prevOp = null;
+
+  for (let idx = 0; idx < tokens.length; idx++) {
+    const tok = tokens[idx];
+    const raw = tok.raw;
+
+    if (!raw) continue;
+    if (/\$\{?/.test(raw) || raw.includes("`")) continue;
+    if (raw.includes("*") || raw.includes("?")) continue;
+
+    if (tok.op && (raw === ">" || raw === ">>" || raw === "<")) {
+      prevOp = raw;
+      continue;
+    }
+    if (prevOp) {
+      allowed.push(raw);
+      prevOp = null;
+      continue;
+    }
+
+    if (tok.op) continue;
+
+    if (pathLikeRe.test(raw)) {
+      allowed.push(raw);
+      continue;
+    }
+  }
+
+  for (const raw of allowed) {
+    let resolved;
+    if (/^\/c\//i.test(raw) || /^\/[a-zA-Z]\//.test(raw)) {
+      resolved = raw.replace(/^\/c\//i, "C:\\").replace(/^\/([a-zA-Z])\//, "$1:\\").replace(/\//g, "\\");
+    } else if (raw === "/tmp" || raw.startsWith("/tmp/")) {
+      // join, not resolve: slice(4) leaves a leading "/" and resolve() would treat it as absolute,
+      // turning /tmp/x into /x on Linux, where os.tmpdir() is /tmp itself.
+      resolved = path.join(os.tmpdir(), raw.slice(4));
+    } else if (path.isAbsolute(raw)) {
+      resolved = path.resolve(raw);
+    } else {
+      resolved = path.resolve(cwd, raw);
+    }
+    if (results.indexOf(resolved) === -1) results.push(resolved);
+  }
+
+  return results;
+}
+
 // First process id of the batch running now (see run_background_command).
 let batchFrom = null;
 
@@ -38,7 +241,25 @@ export function killUnixTree(pid, sig = "SIGTERM") {
   try {
     rows = execFileSync("ps", ["-A", "-o", "pid=,ppid="], { encoding: "utf8", timeout: 5000 })
       .trim().split("\n").map((l) => l.trim().split(/\s+/).map(Number));
-  } catch {}
+  } catch {
+    // Fallback: read /proc to find process tree. Some minimal containers
+    // lack a `ps` that supports -A (e.g. busybox ps). The /proc approach
+    // is slower but always available on Linux.
+    try {
+      for (const entry of require("fs").readdirSync("/proc")) {
+        const n = Number(entry);
+        if (!Number.isNaN(n) && n > 0) {
+          let state = "";
+          try { state = require("fs").readFileSync(`/proc/${n}/stat`, "utf8"); } catch {}
+          const parts = state.split(/\s+/);
+          if (parts.length >= 4) {
+            const ppid = Number(parts[3]);
+            if (!Number.isNaN(ppid)) rows.push([n, ppid]);
+          }
+        }
+      }
+    } catch {}
+  }
   const kids = new Map();
   for (const [p, pp] of rows) {
     if (!kids.has(pp)) kids.set(pp, []);
@@ -275,11 +496,9 @@ export function createProcessHandlers(store) {
         }
       }
 
-      // Enforce allowed paths for cwd if configured
-      if (config.allowedPaths?.length) {
-        const ok = config.allowedPaths.some((dir) => cwd.startsWith(dir) || cwd === dir);
-        if (!ok) return `Error: working directory "${cwd}" is outside allowed paths`;
-      }
+      // Enforce allowed paths for cwd and command text if configured
+      const radiusError = checkShellPathRadius(command, cwd);
+      if (radiusError) return radiusError;
       try {
         // Filter sensitive env vars — allowlist approach
         const safeEnv = {};
@@ -319,6 +538,31 @@ export function createProcessHandlers(store) {
         const shell = sandboxed.shell;
         const shellArgs = sandboxed.shellArgs;
         if (sandboxed.cwd) cwd = sandboxed.cwd;
+        // In headless mode, background commands (`cmd &`) would be reparented
+        // to init and orphaned when the shell exits, surviving the run. A
+        // headless shell is therefore spawned in its own process group
+        // (detached:true) and given a small EXIT trap that kills its own
+        // background jobs — `kill $(jobs -p)` targets the `&` child by PID
+        // rather than `kill 0`, so the shell itself is not signalled and keeps
+        // a clean exit code. The 0.05s sleep lets the freshly-started job
+        // report as a job before the trap fires; 20ms/0.3s were both tested
+        // for reliability.
+        //
+        // The trap MUST NOT overwrite the command's real exit code: `exit 0`
+        // at the end would discard it, making every failing command look
+        // successful to the model. Instead the trap captures `$?` as its very
+        // first action (before any command in the trap body can alter it) and
+        // exits with that value. The `kill ... || true` guards against
+        // `set -e` aborting the trap early when there are no background jobs
+        // (kill returns non-zero), which would also lose the captured code.
+        // Interactive runs get neither the trap nor detached:true, so an
+        // operator's `server &` still survives shell exit and an operator's
+        // own trap/exec is left untouched — normal command completion is
+        // identical to master.
+        const isHeadless = config.headless === true;
+        if (shellArgs.length === 2 && shellArgs[0] === "-c" && isHeadless) {
+          shellArgs[1] = "trap 'rc=$?; sleep 0.05; kill $(jobs -p) 2>/dev/null || true; exit $rc' EXIT; " + shellArgs[1];
+        }
         const MAX_OUTPUT = 1024 * 1024; // 1 MB max output
         // 30s killed the project's own test suite (about 37s) on the
         // 2026-09-26 repair bench; the agent could not run its fix and
@@ -335,6 +579,10 @@ export function createProcessHandlers(store) {
             cwd,
             env: safeEnv,
             stdio: ["ignore", "pipe", "pipe"],
+            // Headless only (see comment above): own process group so the
+            // trap's `kill $(jobs -p)` reaches `&` children without taking
+            // Flint itself down.
+            detached: isHeadless,
           });
           activeChildren.set("run_cmd_" + child.pid, child);
 
@@ -377,6 +625,10 @@ export function createProcessHandlers(store) {
             }, 5000);
           }, COMMAND_TIMEOUT);
 
+          let totalSize = 0;
+          const stdoutChunks = [];
+          const stderrChunks = [];
+
           child.on("close", () => {
             clearTimeout(timeoutHandle);
             if (safetyResolveHandle) clearTimeout(safetyResolveHandle);
@@ -386,20 +638,49 @@ export function createProcessHandlers(store) {
           // R0 fix: propagate external abort signal to child process tree
           const signal = _currentAbortSignal;
           if (signal) {
-            const onAbort = () => killTree();
+            // When the abort signal fires during run_command (e.g. SIGTERM on
+            // the headless process), killTree kills the child and its tree, but
+            // the close event may never fire if a grandchild holds the stdio
+            // pipes open (common on Linux: `bash -c "sleep 60"` forks sleep as
+            // a child that keeps the pipes, and ps-based tree kill may miss it).
+            // Without a resolve, run_command hangs and the agent loop never
+            // sees signal.aborted, so the headless try/catch never saves the
+            // session or prints JSON. Resolve immediately and destroy the pipes
+            // so the close event (if it fires later) resolves to a no-op.
+            const onAbort = () => {
+              killTree();
+              // Resolve immediately — do NOT defer via a safety timer. On POSIX,
+              // the close event fires and its handler (above) clears any timer we
+              // set, so a delayed resolve never runs and the promise hangs.
+              // The close handler's resolve is a harmless no-op once we have
+              // resolved. Destroying the stdio streams ensures the close event
+              // still fires for the child's exit bookkeeping.
+              try { child.stdout?.destroy(); } catch {}
+              try { child.stderr?.destroy(); } catch {}
+              // The child stays in activeChildren until its close event (above)
+              // says it is gone. killTree on Windows is a taskkill that is
+              // spawned and not waited for, and a run that is being stopped
+              // exits within milliseconds of this abort: taken off the list
+              // here, the command was out of killAllChildrenSync's reach and
+              // outlived the run (--time-limit during a command, 2026-10-08).
+              resolve({
+                code: null,
+                stdout: Buffer.concat(stdoutChunks).toString("utf-8"),
+                stderr: "[killed by external abort]",
+                truncated: false,
+                timedOut: false,
+              });
+            };
             if (signal.aborted) {
               onAbort();
             } else {
               signal.addEventListener("abort", onAbort, { once: true });
               child.on("close", () => {
-                try { signal.removeEventListener("abort", onAbort); } catch {}
+                signal.removeEventListener("abort", onAbort);
               });
             }
           }
 
-          const stdoutChunks = [];
-          const stderrChunks = [];
-          let totalSize = 0;
           const onData = (chunks) => (d) => {
             totalSize += d.length;
             if (totalSize > MAX_OUTPUT) {
@@ -473,6 +754,12 @@ export function createProcessHandlers(store) {
       // A batch is the processes that ran at the same time; the summary counts
       // only those, not every process this session ever started.
       if (!store.getState().processes.some((p) => p.status === "running")) batchFrom = null;
+
+      // Enforce allowed paths for cwd and command text (same as run_command)
+      const bgCwd = config.baseDir || config.projectRoot;
+      const bgRadiusError = checkShellPathRadius(command, bgCwd);
+      if (bgRadiusError) return bgRadiusError;
+
       const shell = config.shell;
       const shellArgs = ["-c", command];
 

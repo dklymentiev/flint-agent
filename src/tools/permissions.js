@@ -5,6 +5,50 @@ import path from "node:path";
 import { executeTool, getDefinitions } from "./registry.js";
 import { mcpServerOf } from "./mcp-tool-servers.js";
 
+// ── Synonym table ────────────────────────────────────────────
+//
+// Some models call Flint's tools by synonyms from their own vocabulary rather
+// than by Flint's names: `shell` instead of `run_command`, `read` instead of
+// `read_file`, `ls` for `list_directory`, `grep` for `search_in_files`, etc.
+//
+// This table is consulted BEFORE the Levenshtein repair, because some of these
+// names are too distant for a <= 2 edit distance (shell→run_command is 6).
+// It is NOT a fallback that bypasses security: the name is rewritten to the
+// real tool name, and then the normal permission check runs on the real name.
+// A synonym therefore inherits exactly the protections of the tool it maps to.
+//
+// Rules:
+// 1. If the requested name is already a real registered tool, the table is
+//    skipped — a plugin/MCP tool named "shell" wins over the synonym.
+// 2. If the name maps to a real tool, the model is told the real name via
+//    the `synonym` field in the return value.
+// 3. The Levenshtein repair still runs as a second-stage fallback for typos.
+export const TOOL_NAME_SYNONYMS = Object.freeze({
+  shell: "run_command",
+  bash: "run_command",
+  exec: "run_command",
+  run: "run_command",
+  command: "run_command",
+  read: "read_file",
+  cat: "read_file",
+  write: "write_file",
+  edit: "edit_file",
+  ls: "list_directory",
+  dir: "list_directory",
+  find: "glob",
+  grep: "search_in_files",
+  rg: "search_in_files",
+});
+
+export function _resolveSynonymName(name) {
+  return TOOL_NAME_SYNONYMS[name] || null;
+}
+
+// Reset the once-per-session announcement tracker. Used by tests.
+export function resetSynonymAnnouncements() {
+  _announcedSynonyms.clear();
+}
+
 // Tool-name auto-repair at the entry point so permission checks use the corrected name.
 // Levenshtein distance <= 2, unambiguous closest match.
 function _levDistance(a, b) {
@@ -34,9 +78,18 @@ function _repairToolName(name) {
     return null;
   } catch { return null; }
 }
+
 import { config } from "../config.js";
 import { grantCommandApproval } from "./command-approvals.js";
 import { LEVELS, levelOptions, parseLevelAnswer, SECRET_FILE_PATTERNS, toolPermissionAtLevel, DEFAULT_ONBOARDING_LEVEL } from "../security/policies.js";
+
+// Is this name already a real registered tool? Used to let a plugin/MCP tool
+// named, say, "shell", win over the synonym table entry for "shell".
+function _nameIsRegistered(name) {
+  try {
+    return getDefinitions().some(t => t.function?.name === name);
+  } catch { return false; }
+}
 
 // ── Security level, from the one onboarding question ──
 
@@ -328,12 +381,17 @@ const PERMISSIONS_FILE = config.permissionsFile
 // One file, because the operator should have one place to look at what they
 // have granted.
 const APPROVED_PATHS_KEY = "_approvedPaths";
+// command-approvals.js manages this key separately, writing and reading it
+// via its own load()/persist(). permissions.js must preserve it across
+// tool-override writes (or an /allow that triggers saveOverridesToDisk
+// would silently erase a remembered "always" for a command).
+const COMMAND_APPROVALS_KEY = "_commandApprovals";
 
 function loadPermissionsFile() {
   try {
     if (existsSync(PERMISSIONS_FILE)) {
       const raw = JSON.parse(readFileSync(PERMISSIONS_FILE, "utf-8"));
-      const { [APPROVED_PATHS_KEY]: paths, ...levels } = raw;
+      const { [APPROVED_PATHS_KEY]: paths, [COMMAND_APPROVALS_KEY]: _cmd, ...levels } = raw;
       return { levels, paths: paths && typeof paths === "object" ? paths : {} };
     }
   } catch {}
@@ -342,8 +400,20 @@ function loadPermissionsFile() {
 
 function saveOverridesToDisk() {
   try {
+    // Preserve _commandApprovals from the existing file: command-approvals.js
+    // writes and reads that key via its own persist()/load(), and a blind
+    // overwrite of the file here would erase a remembered "always" command
+    // grant the moment any tool permission changes. Tool-level overrides come
+    // from sessionOverrides; everything else on disk is left untouched.
+    const existing = existsSync(PERMISSIONS_FILE)
+      ? JSON.parse(readFileSync(PERMISSIONS_FILE, "utf-8"))
+      : {};
     const out = { ...sessionOverrides };
+    if (existing[COMMAND_APPROVALS_KEY]) {
+      out[COMMAND_APPROVALS_KEY] = existing[COMMAND_APPROVALS_KEY];
+    }
     if (Object.keys(approvedPaths).length) out[APPROVED_PATHS_KEY] = approvedPaths;
+    else delete out[APPROVED_PATHS_KEY];
     writeFileSync(PERMISSIONS_FILE, JSON.stringify(out, null, 2) + "\n");
   } catch {}
 }
@@ -430,7 +500,14 @@ export function getPermission(name) {
   if (server && sessionOverrides[mcpServerKey(server)]) return sessionOverrides[mcpServerKey(server)];
   // The chosen care level relaxes a default of "confirm" (see policies.js).
   const level = getOnboardingAnswer() || DEFAULT_ONBOARDING_LEVEL;
-  return toolPermissionAtLevel(level, name, DEFAULT_PERMISSIONS[name] || "confirm");
+  const resolved = toolPermissionAtLevel(level, name, DEFAULT_PERMISSIONS[name] || "confirm");
+  // A run with no operator cannot answer a prompt, and the operator who started
+  // it already chose its MCP servers (the launch config names them): their tools
+  // run. This is only the DEFAULT; a rule the operator set returned above, and a
+  // call a guard forced to confirm (dangerous command, secret file, plugin) is
+  // still refused. FLINT_HEADLESS_MCP=ask restores the refusal.
+  if (_unattended && server && resolved === "confirm" && config.headlessMcp !== "ask") return "allow";
+  return resolved;
 }
 
 export function setPermission(name, level) {
@@ -517,10 +594,28 @@ export function getBulkPermission() {
 
 const PLUGIN_LOAD_TOOLS = new Set(["install_plugin", "reload_plugins"]);
 
+// Which (session, synonym) pairs have been announced to the model, so the
+// "X here is Y" line appears once per synonym per session, not every call.
+const _announcedSynonyms = new Set();
+
 // ── Main wrapper ──
 
-export async function executeToolWithPermissions(name, args) {
-  // 0. Auto-repair: if tool name is slightly off (typo, variant), map to closest real name.
+export async function executeToolWithPermissions(name, args, { sessionId = "" } = {}) {
+  // 0a. Synonym: some models use a different name for a real tool (shell→
+  // run_command, read→read_file, etc.). Resolve BEFORE Levenshtein, because
+  // some pairs are too distant for a <= 2 edit distance. The real name then
+  // flows into getPermission and executeTool unchanged, so every protection
+  // that applies to the real tool applies to the synonym.
+  let synonym = null;
+  const realName = _resolveSynonymName(name);
+  if (realName && _nameIsRegistered(name)) {
+    // A tool with this name really exists (plugin, MCP, built-in) — it wins.
+    // No remapping.
+  } else if (realName) {
+    synonym = name;
+    name = realName;
+  }
+  // 0b. Auto-repair: typo or slight variant, map to closest real name.
   const repaired = _repairToolName(name);
   if (repaired && repaired !== name) {
     console.error(`[tool-repair] '${name}' -> '${repaired}'`);
@@ -542,7 +637,7 @@ export async function executeToolWithPermissions(name, args) {
     if (verdict) {
       if (verdict.deny) {
         logSecurity("DENIED_HOOK", name, args, verdict.reason);
-        return { result: `Denied by hook: ${verdict.reason || "no reason"}`, denied: true, denyKey: verdict.denyKey || null };
+        return { result: `Denied by hook: ${verdict.reason || "no reason"}`, denied: true, denyKey: verdict.denyKey || null, synonym, name };
       }
       if (verdict.allow) { hookAllowed = true; break; }
       if (verdict.confirm) {
@@ -621,7 +716,7 @@ export async function executeToolWithPermissions(name, args) {
 
   if (level === "deny") {
     logSecurity("DENIED_RULE", name, args, "tool denied by rule");
-    return { result: `Tool "${name}" is denied.`, denied: true };
+    return { result: `Tool "${name}" is denied.`, denied: true, synonym, name };
   }
 
   if ((level === "confirm" || forceConfirm) && confirmFn) {
@@ -641,6 +736,8 @@ export async function executeToolWithPermissions(name, args) {
           ` Do not retry this call and do not look for another tool that does the same thing.` +
           ` Finish the turn and say plainly what you need approved.`,
         denied: true,
+        synonym,
+        name,
       };
     }
 
@@ -689,6 +786,8 @@ export async function executeToolWithPermissions(name, args) {
           (confirmReason ? ` Approval was required because ${confirmReason}.` : "") +
           ` Do not retry this call; ask the operator in plain words instead.`,
         denied: true,
+        synonym,
+        name,
       };
     } else if (answer !== "yes") {
       logSecurity("DENIED_USER", name, args, "user denied");
@@ -697,6 +796,8 @@ export async function executeToolWithPermissions(name, args) {
           (confirmReason ? ` Approval was required because ${confirmReason}.` : "") +
           ` Do not retry this call or route around the denial; say what you needed and why.`,
         denied: true,
+        synonym,
+        name,
       };
     }
   }
@@ -712,5 +813,28 @@ export async function executeToolWithPermissions(name, args) {
     }
   }
 
-  return { result, denied: false };
+  // 5. Synonym announcement: on the first use of a synonym this session,
+  // prepend a one-line notice so the model learns the real tool name.
+  // Subsequent calls with the same synonym skip this — the model already
+  // knows. The notice is part of result text (what the model sees), not
+  // metadata, so it survives every downstream path (swap, table, etc.).
+  // Keyed by session: a new session starts a model with no memory of the last
+  // one's announcement, and the process outlives sessions.
+  const announceKey = `${sessionId}|${synonym}`;
+  if (synonym && !_announcedSynonyms.has(announceKey)) {
+    _announcedSynonyms.add(announceKey);
+    const notice = `[${synonym} is an alias for ${name} — use ${name} directly.]`;
+    if (typeof result === "string") {
+      result = `${notice}\n${result}`;
+    } else if (result && typeof result === "object" && ("_table" in result || result._image)) {
+      // No text field the model reads; the caller shows `_announcement` itself.
+      result = { ...result, _announcement: notice };
+    } else if (result && typeof result === "object" && typeof result.text === "string") {
+      result.text = `${notice}\n${result.text}`;
+    } else {
+      result = `${notice}\n${result}`;
+    }
+  }
+
+  return { result, denied: false, synonym, name };
 }

@@ -3,7 +3,8 @@
 Status: implemented 2026-10-02 (branch `stdio-mode`). Flint as a long-lived
 subprocess driven over stream-json. The aim is that a host written for
 `claude -p` stream-json can start Flint instead with the same command line and
-read the same lines back.
+read the same lines back, as long as it skips the lines Flint adds (see
+Protocol).
 
 ## Starting it
 
@@ -74,6 +75,24 @@ whether or not something was running.
 | `{"type":"assistant","message":{"id","role":"assistant","model","content":[text and tool_use blocks],"usage":{"input_tokens","output_tokens",...}},"session_id"}` | Each model reply, as it arrives. |
 | `{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id","content","is_error"}]}}` | Each tool result (cut at 16,000 characters). |
 | `{"type":"result","subtype","is_error","result","session_id","num_turns","duration_ms","total_cost_usd","usage"}` | The end of every turn. |
+| `{"type":"control_response","response":{"subtype":"success" or "error","request_id",...}}` | The answer to a `control_request`. |
+
+Those are the common stream-json lines. Flint also writes lines and fields
+that the `claude` stream-json format does not have:
+
+| Line | When |
+|------|------|
+| `{"type":"tool_start","tool_use_id","tool_name","args","session_id"}` | A tool begins. `tool_use_id` is the id of its `tool_use` block and of its later `tool_result`. |
+| `{"type":"text","text","session_id"}` | One chunk of the reply as the model streams it, thinking left out. The same text comes again, whole, in the `assistant` line that follows. |
+| `{"type":"steer_applied","request_id","source":"host","applied_to":"running_turn" or "new_turn","text","session_id"}` | A `control_request` with subtype `steer` was taken by the running turn or started a turn of its own. |
+
+Added fields: the tool result line carries `tool_name`, `args` and
+`duration_ms` (milliseconds from that call's own start) beside `message`; the
+`result` line carries `stop_reason`, `truncated_at` and `provider_error`.
+
+A host has to skip a line whose `type` it does not know and ignore fields it
+does not know. One that rejects unknown types cannot read Flint as it is:
+these lines are always written, there is no flag that turns them off.
 
 `subtype` is `success` (also when the agent stopped asking after denials and
 said so), `error_max_budget_usd` (Flint's cost ceiling), or
@@ -109,10 +128,10 @@ host the process cannot restart itself.
 
 ## Limits to know about
 
-- No token-by-token stream (`--include-partial-messages`); text arrives a
-  reply at a time.
-- A tool that runs for minutes writes nothing meanwhile. A host with a
-  per-line timeout should allow for that silence.
+- No `stream_event` lines (`--include-partial-messages` is accepted and
+  ignored). Streamed text comes as Flint's own `text` lines, see above.
+- A tool that runs for minutes writes `tool_start` and then nothing until its
+  result. A host with a per-line timeout should allow for that silence.
 - The work of an interrupted turn is not kept in the history; the interrupt
   note is.
 - The model ids are the provider's. A host passing short aliases (`sonnet`)

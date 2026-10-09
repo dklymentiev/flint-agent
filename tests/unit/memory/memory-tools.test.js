@@ -3,6 +3,7 @@ import path from "node:path";
 import { createTmpDir } from "../../helpers/tmp-dir.js";
 
 let tmp;
+let previousDataDir;
 const mockConfig = {};
 
 vi.mock("../../../src/config.js", () => ({
@@ -18,6 +19,8 @@ let handlers, store;
 
 beforeEach(async () => {
   tmp = createTmpDir();
+  previousDataDir = process.env.FLINT_DATA_DIR;
+  delete process.env.FLINT_DATA_DIR;
   mockConfig.projectRoot = tmp.path;
   mockConfig.sessionsDir = path.join(tmp.path, "sessions");
   vi.resetModules();
@@ -27,6 +30,8 @@ beforeEach(async () => {
 });
 
 afterEach(() => {
+  if (previousDataDir === undefined) delete process.env.FLINT_DATA_DIR;
+  else process.env.FLINT_DATA_DIR = previousDataDir;
   tmp.cleanup();
 });
 
@@ -127,6 +132,22 @@ describe("memory_get", () => {
 
   it("last=N returns recent memories", () => {
     const result = handlers.memory_get({ last: 2 });
+    expect(result).toContain("fact three");
+    expect(result).toContain("fact two");
+    expect(result).not.toContain("fact one");
+  });
+
+  it("ignores nonpositive IDs when listing recent memories", () => {
+    for (const id of [0, -1]) {
+      const result = handlers.memory_get({ id, last: 2 });
+      expect(result).toContain("fact three");
+      expect(result).toContain("fact two");
+      expect(result).not.toContain("fact one");
+    }
+  });
+
+  it("lists recent memories when both last and an ID are supplied", () => {
+    const result = handlers.memory_get({ id: 1, last: 2 });
     expect(result).toContain("fact three");
     expect(result).toContain("fact two");
     expect(result).not.toContain("fact one");

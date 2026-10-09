@@ -172,10 +172,10 @@ export const STOP_REASON_TEXT = {
 
 /**
  * Decide whether to continue after agent returns.
- * @param {object} opts - { stopReason, plan, isApiScoped, apiGoalId, apiVerified }
+ * @param {object} opts - { stopReason, plan, isApiScoped, apiGoalId, apiSelfContinue }
  * @returns {null | {action: "stop"|"continue"|"verify", message?: string, prompt?: string}}
  */
-export function shouldContinue({ stopReason, plan, isApiScoped, apiGoalId }) {
+export function shouldContinue({ stopReason, plan, isApiScoped, apiGoalId, apiSelfContinue }) {
   // User interrupt: any non-self-continue message during auto-continue pauses the plan.
   // The user typed something → they want control. Don't fight them with auto-Continue.
   // Clear via resetFlow() (/new) or setUserInterrupt(false) (/resume).
@@ -215,6 +215,17 @@ export function shouldContinue({ stopReason, plan, isApiScoped, apiGoalId }) {
       action: "continue",
       prompt: "Your plan is complete. Check if your original task has more work. If everything is truly done, write a summary and stop.",
     };
+  }
+
+  // API self-continue is opt-in: an API message that creates a plan with
+  // pending tasks does not keep going on its own. The caller must set
+  // `autonomous: true` in the request body to enable it. This prevents
+  // an API task from spinning up a whole plan and running it unattended
+  // when the caller only wanted one turn.
+  // TUI /auto mode (isApiScoped = false) is unaffected: it always self-continues.
+  if (isApiScoped && !apiSelfContinue) {
+    log.info("flow: API scope, pending tasks, but self-continue not opted in — stopping", { apiGoalId });
+    return { action: "stop", reason: "api_self_continue_not_enabled" };
   }
 
   // Plan has pending tasks — find next

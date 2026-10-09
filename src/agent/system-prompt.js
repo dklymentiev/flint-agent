@@ -230,7 +230,10 @@ function buildPrompt(opts = {}) {
   // Trusted because it's maintained by the agent itself (scanned for
   // injection). Placed high in the prompt so it's not lost in context
   // middle. See src/agent/project-context.js for the loader.
-  const flintMdBlock = formatFlintMdBlock(process.cwd());
+  // The folder the agent works in (config.baseDir: where Flint was started, or
+  // --cwd), not process.cwd(), which is Flint's own install folder.
+  const workFolder = config.baseDir || process.cwd();
+  const flintMdBlock = formatFlintMdBlock(workFolder);
   if (flintMdBlock) {
     parts.push("");
     parts.push(flintMdBlock);
@@ -249,7 +252,7 @@ function buildPrompt(opts = {}) {
   // resolution: it changed the prefix every later token is cached against
   // roughly once a minute. It is now a per-turn section below the boundary.
   parts.push("");
-  parts.push(`ENVIRONMENT: ${osInfo.name} (${os.arch()}) | Shell: ${osInfo.shell} | CWD: ${process.cwd()}`);
+  parts.push(`ENVIRONMENT: ${osInfo.name} (${os.arch()}) | Shell: ${osInfo.shell} | CWD: ${workFolder}`);
   if (osInfo.name === "Windows") parts.push("Shell uses bash. Use Unix commands (ls, cat, grep), not PowerShell.");
 
   // Task-driven child agent instructions

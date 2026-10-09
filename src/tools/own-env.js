@@ -18,14 +18,14 @@
 
 import { existsSync, mkdirSync } from "node:fs";
 import { join, delimiter } from "node:path";
-import { homedir } from "node:os";
 import { spawn } from "node:child_process";
 import { createLogger } from "../logging/logger.js";
+import { homeStateDir } from "../data-dir.js";
 
 const log = createLogger("own-env");
 const isWin = process.platform === "win32";
 
-export function ownEnvPaths(dir = process.env.FLINT_ENV_DIR || join(homedir(), ".flint", "env")) {
+export function ownEnvPaths(dir = process.env.FLINT_ENV_DIR || join(homeStateDir(), "env")) {
   const venv = join(dir, "py");
   const npmPrefix = join(dir, "npm");
   return {

@@ -3,7 +3,10 @@ import path from "node:path";
 import { config } from "../config.js";
 import { loadAll, getMemoryStats } from "./store.js";
 
-const MEMORY_MD = path.join(config.projectRoot, "MEMORY.md");
+const memoryRoot = process.env.FLINT_DATA_DIR
+  ? path.resolve(process.env.FLINT_DATA_DIR)
+  : config.projectRoot;
+const MEMORY_MD = path.join(memoryRoot, "MEMORY.md");
 
 export function updateMemoryMd() {
   const memories = loadAll();

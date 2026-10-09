@@ -129,6 +129,12 @@ export function initSecurity(store, config) {
   } catch (err) {
     // SECURITY: Never silently degrade — fail hard if security can't init
     console.error(`[CRITICAL] Security init failed: ${err.message}`);
+    // A path that cannot be written is the usual cause on a fresh machine or a
+    // read-only install; say which setting fixes it instead of leaving a raw
+    // mkdir error.
+    if (["ENOTDIR", "EACCES", "EPERM", "EROFS", "ENOENT", "EEXIST"].includes(err?.code)) {
+      console.error("[CRITICAL] Flint cannot write its state folder. Point FLINT_DATA_DIR (or --data-dir) at a folder you can write to.");
+    }
     console.error("[CRITICAL] Agent cannot run without security hooks. Exiting.");
     process.exit(78); // EX_CONFIG — configuration error
   }

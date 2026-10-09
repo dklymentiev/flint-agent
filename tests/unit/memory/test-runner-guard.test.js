@@ -81,24 +81,23 @@ describe("home isolation guard", () => {
     expect(path.resolve(flintDir)).toBe(path.join(SANDBOX, ".flint"));
   });
 
-  it("sqlite-store guard still fires without FLINT_DATA_DIR", async () => {
-    // Belt-and-suspenders: the sqlite-store guard from round 1 should still work.
-    //
-    // We MUST NOT delete HOME/USERPROFILE — that lets os.homedir() fall through
-    // to the real machine home.  If the guard is missing (old code), the
-    // database opens at the real ~/.flint/memory/.  Instead, point them at a
-    // throwaway temp dir so even broken code cannot reach the real home.
+  it("sqlite-store guard still fires when HOME is the real machine home", async () => {
+    // Belt-and-suspenders: the sqlite-store guard must refuse to open the
+    // real home database. With the HOME-based guard (FLINT_DATA_DIR is no
+    // longer set in unit tests), we simulate a misconfigured environment by
+    // pointing HOME at something that looks like a real home, not a temp dir.
     const saved = process.env.FLINT_DATA_DIR;
     delete process.env.FLINT_DATA_DIR;
 
     const origHOME = process.env.HOME;
     const origUP = process.env.USERPROFILE;
-    const throwaway = fs.mkdtempSync(path.join(os.tmpdir(), "flint-guard-"));
-    process.env.HOME = throwaway;
-    process.env.USERPROFILE = throwaway;
+    // Use a path that does NOT look like a temp dir, so the guard fires.
+    process.env.HOME = "/home/someone";
+    process.env.USERPROFILE = "/home/someone";
 
-    const { getDb, closeDb } = await import("../../../src/memory/sqlite-store.js");
-    // The round-1 guard checks VITEST && !FLINT_DATA_DIR → throws
+    const { closeDb } = await import("../../../src/memory/sqlite-store.js");
+    const { getDb } = await import("../../../src/memory/sqlite-store.js");
+    // The guard checks HOME is a sandbox temp dir; /home/someone is not.
     expect(() => getDb()).toThrow(/Refusing to open real.*database/);
     try { closeDb(); } catch {}
 
@@ -106,6 +105,35 @@ describe("home isolation guard", () => {
     else delete process.env.FLINT_DATA_DIR;
     process.env.HOME = origHOME;
     process.env.USERPROFILE = origUP;
-    fs.rmSync(throwaway, { recursive: true, force: true });
   });
 });
+
+  it("does NOT refuse a temp sandbox path with a worker-N suffix (Linux path shape)", async () => {
+    // On Linux the test runner creates per-worker sandboxes like:
+    //   /tmp/flint-test-home-XXX-worker/worker-N
+    // The basename is "worker-N" (does not start with "flint-"), so the
+    // guard must fall through to the os.tmpdir() check, not the basename
+    // check. Without that check, this sandbox path looks like a real home.
+    const saved = process.env.FLINT_DATA_DIR;
+    delete process.env.FLINT_DATA_DIR;
+
+    const origHOME = process.env.HOME;
+    const origUP = process.env.USERPROFILE;
+    const sandboxPath = path.join(os.tmpdir(), "flint-test-home-abc-worker", "worker-1");
+    process.env.HOME = sandboxPath;
+    process.env.USERPROFILE = sandboxPath;
+
+    const { closeDb, getDb } = await import("../../../src/memory/sqlite-store.js");
+    // Close any existing connection so getDb re-runs the guard with the
+    // new HOME.  The singleton caches the db handle; without close() the
+    // guard never re-evaluates.
+    closeDb();
+    // Should NOT throw — the sandbox path lives under os.tmpdir()
+    expect(() => getDb()).not.toThrow();
+    try { closeDb(); } catch {}
+
+    if (saved !== undefined) process.env.FLINT_DATA_DIR = saved;
+    else delete process.env.FLINT_DATA_DIR;
+    process.env.HOME = origHOME;
+    process.env.USERPROFILE = origUP;
+  });

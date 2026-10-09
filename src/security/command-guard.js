@@ -136,12 +136,17 @@ export function createCommandGuardHook(policy) {
     const stripped = stripShellNoise(command).replace(/\s+/g, " ").trim();
 
     // 1. Check hard deny patterns — these are always blocked
-    for (const pattern of policy.commandDenyPatterns) {
-      if (pattern.test(stripped)) {
+    for (const entry of policy.commandDenyPatterns) {
+      // Entries can be a bare RegExp or { pattern, label }. Normalise so the
+      // guard's interface stays unchanged: policy.commandDenyPatterns is still
+      // just a list of matchers.
+      const re = entry?.pattern || entry;
+      if (re.test(stripped)) {
+        const label = entry?.label || re.source;
         return {
           deny: true,
-          reason: `dangerous command blocked: matches pattern ${pattern.source.slice(0, 40)}`,
-          denyKey: `cmd:${pattern.source}`,
+          reason: `dangerous command blocked: ${label}`,
+          denyKey: `cmd:${re.source}`,
         };
       }
     }

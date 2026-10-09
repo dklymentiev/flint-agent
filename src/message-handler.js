@@ -208,6 +208,8 @@ export async function processMessage(content, name, opts = {}) {
   // timer spinning in the title of an idle Flint for good. stop() is
   // idempotent; the normal end still leaves the cost line as the title.
   const windowTitle = startAliveTitle();
+  // The first words of the request; the title cuts them to a fixed width.
+  windowTitle.setTask(typeof content === "string" ? content : "");
   try {
     return await runTurn(windowTitle, content, name, opts);
   } finally {
@@ -382,9 +384,9 @@ async function runTurn(windowTitle, content, name, { signal: externalSignal } = 
   let thinkBuf = "";
   let thinkCount = 0;
 
-  let text, stats, stop_reason, retryAfter, filesChanged;
+  let text, stats, stop_reason, retryAfter, filesChanged, repoClaimGap, truncated_at, providerError;
   try {
-  ({ text, stats, stop_reason, retryAfter, filesChanged } = await runAgent(apiMessages, {
+  ({ text, stats, stop_reason, retryAfter, filesChanged, repoClaimGap, truncated_at, providerError } = await runAgent(apiMessages, {
     // Esc stops the current step, not the task. The loop hands over its
     // own step-scoped signal here; Esc reaches that one and never the
     // whole-loop controller in the options below, so answering a question typed
@@ -403,6 +405,7 @@ async function runTurn(windowTitle, content, name, { signal: externalSignal } = 
     },
 
     onToken(token) {
+      tellObserver("onToken", token);
       log.debug("onToken", { len: token.length, responseStarted, inThinking, streamBufLen: streamBuf.length });
       stopSpinner();
       if (!responseStarted) responseStarted = true;
@@ -438,6 +441,11 @@ async function runTurn(windowTitle, content, name, { signal: externalSignal } = 
       }
 
       streamBuf += token;
+
+      // Forward every non-thinking token to the turn observer, so a stdio
+      // host sees streamed text as it arrives instead of only after the
+      // whole reply is assembled.
+      tellObserver("onToken", token, { inThinking });
 
       // Detect <thinking> open tag
       if (streamBuf.includes("<thinking>")) {
@@ -483,6 +491,7 @@ async function runTurn(windowTitle, content, name, { signal: externalSignal } = 
     },
 
     onStreamEnd() {
+      tellObserver("onStreamEnd");
       log.debug("onStreamEnd", { streamBufLen: streamBuf.length, responseTruncated, responseLineCount });
       stopSpinner();
       if (streamTimer) {
@@ -499,7 +508,7 @@ async function runTurn(windowTitle, content, name, { signal: externalSignal } = 
       flushAgentState(); // flush any buffered table/code block state
     },
 
-    onToolStart(toolName, args) {
+    onToolStart(toolName, args, info = {}) {
       log.debug("onToolStart", { tool: toolName, argsKeys: Object.keys(args || {}) });
       stopSpinner();
       store.getState().setAgentStatus("calling-tool", toolName);
@@ -508,6 +517,9 @@ async function runTurn(windowTitle, content, name, { signal: externalSignal } = 
       store.getState().setActivity({ kind: "tool", label: `running ${toolName}`, tool: toolName, arg: toolArgument(args) });
       store.getState().addToolActivity({ name: toolName, args: formatToolArgs(args) });
       toolStartedAt = Date.now();
+      // The call's id goes with it: a listener that times tools (stdio/session.js)
+      // must tell two calls of one tool apart, and the name cannot.
+      tellObserver("onToolStart", toolName, args, { startedAt: toolStartedAt, id: info?.id });
     },
 
     onToolResult(toolName, result, denied, opts = {}) {
@@ -591,6 +603,7 @@ async function runTurn(windowTitle, content, name, { signal: externalSignal } = 
     },
 
     onApiCall(callNum, msgs, tools) {
+      tellObserver("onApiCall", callNum);
       logApiCall(sessionId, callNum, msgs, tools);
       // Live iteration counter
       store.setState({ _iterationCount: callNum });
@@ -606,7 +619,9 @@ async function runTurn(windowTitle, content, name, { signal: externalSignal } = 
     },
 
     onCheckQueue() {
-      return takeQueuedMessages(store._bus, store, { autonomous: app.autonomous });
+      const bus = takeQueuedMessages(store._bus, store, { autonomous: app.autonomous }) || [];
+      const steers = turnObserver?.onCheckQueue?.() || [];
+      return bus.length || steers.length ? [...bus, ...steers] : null;
     },
 
     getCurrentPlanStep() {
@@ -647,6 +662,20 @@ async function runTurn(windowTitle, content, name, { signal: externalSignal } = 
     clearStep();
     setMcpAbortSignal(null);
     store.getState().unregisterTask(taskId);
+    // The session's tool counts, here and not after the return: a turn that
+    // was aborted (time limit, SIGTERM, /stop) or ended with no text never
+    // reached the end of this function, so the calls it made were missing
+    // from totals whose cost, charged per call, already included them. The
+    // headless record reads both. A denied call carries _denied: true on its
+    // tool message (agent.js) and is still a call the model made.
+    const afterUser = apiMessages.indexOf(msg);
+    const turnMessages = afterUser === -1 ? [] : apiMessages.slice(afterUser + 1);
+    store.getState().addTurnToolCalls(
+      turnMessages
+        .filter((m) => m.role === "assistant" && Array.isArray(m.tool_calls))
+        .reduce((n, m) => n + m.tool_calls.filter((tc) => tc.function?.name).length, 0),
+      turnMessages.filter((m) => m.role === "tool" && m._denied === true).length,
+    );
   }
 
   if (!text) return { text: "", stats: { generationIds: [] } };
@@ -675,14 +704,16 @@ async function runTurn(windowTitle, content, name, { signal: externalSignal } = 
     }
   }
 
-  // Update store with results. One drain, every source, priced once at the
-  // door: the main loop, the classifier, the fact extractor and the outcome
-  // ask all arrive here already counted. The store is the display, not the
-  // ledger — it is fed from the notebook and never adds anything up itself.
+  // The store is topped up live, one call at a time, by applyUsage() in
+  // client.js — every call through the door pushes its delta into the session
+  // totals immediately, so the cost shown by the status line, /status and the
+  // API usage block climbs after each call instead of only after the turn.
+  // What is left in the ledger is the per-turn receipt (below); re-merging it
+  // here would charge every call twice — once live, once at the drain — so
+  // addUsage is deliberately NOT called: the drain is for the receipt only.
   const turn = drainUsage();
   const used = sumUsage(turn);
   const cost = used.cost;
-  store.getState().addUsage(turn);
   store.setState({ messages: [...messages], lastContextTokens: stats.contextTokens || 0, contextEstimated: false });
 
   // The receipt that closes the turn (ui/tool-ledger.js): tools, files the
@@ -700,6 +731,14 @@ async function runTurn(windowTitle, content, name, { signal: externalSignal } = 
     estimated: ss.sessionCostEstimated,
     stopped: stop_reason && stop_reason !== "done" ? stop_reason : null,
   }));
+
+  // Footer: flag a claimed "done" whose git repo was clean when the turn
+  // finished — executing tools ran, but the repo shows no trace of work.
+  if (repoClaimGap) {
+    store.getState().addLine(
+      chalk.dim(`${INDENT}· Claimed done but repo shows no changes`)
+    );
+  }
 
   store.getState().setAgentStatus("idle");
   store.getState().clearActivity();
@@ -741,7 +780,7 @@ async function runTurn(windowTitle, content, name, { signal: externalSignal } = 
   // that factual questions were answered via a search/read and not guessed.
   // Returns list of {name, arguments} for each tool call in THIS message's
   // processing — not the full session history.
-  const callsThisTurn = messages
+const callsThisTurn = messages
     .slice(messagesBeforeTurn || 0)
     .filter(m => m.role === "assistant" && Array.isArray(m.tool_calls))
     .flatMap(m => m.tool_calls.map(tc => ({
@@ -750,7 +789,10 @@ async function runTurn(windowTitle, content, name, { signal: externalSignal } = 
     })))
     .filter(c => c.name);
 
-  return { text, stats: { ...stats, cost }, stop_reason: stop_reason || "done", retryAfter: retryAfter ?? null, toolCalls: callsThisTurn };
+  // The session's tool counts were added in the `finally` above, so an
+  // interrupted turn is counted too.
+
+  return { text, stats: { ...stats, cost }, stop_reason: stop_reason || "done", retryAfter: retryAfter ?? null, toolCalls: callsThisTurn, repoClaimGap, truncated_at: truncated_at || null, providerError: providerError || null };
 }
 
 export async function handlePendingAction() {

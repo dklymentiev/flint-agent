@@ -2,11 +2,11 @@
 
 import crypto from "node:crypto";
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
-import { homedir } from "node:os";
 import { join } from "node:path";
+import { homeStateDir } from "../data-dir.js";
 import { isPairedToken } from "./pairing.js";
 
-const FLINT_DIR = join(homedir(), ".flint");
+const FLINT_DIR = join(homeStateDir());
 const TOKEN_FILE = join(FLINT_DIR, "api-token.json");
 // Token TTL: 30 days. After expiry, a fresh one is generated on next startup.
 const TOKEN_TTL_MS = 30 * 24 * 60 * 60 * 1000;

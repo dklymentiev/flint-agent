@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { initRegistry, executeTool, getDefinitions } from "../../../src/tools/registry.js";
+import { initRegistry, executeTool, getDefinitions, registerMcpTools } from "../../../src/tools/registry.js";
+import { noteMcpTool } from "../../../src/tools/mcp-tool-servers.js";
 import { createMockStore } from "../../helpers/mock-store.js";
 import { createTmpDir } from "../../helpers/tmp-dir.js";
 import fs from "node:fs";
@@ -64,6 +65,24 @@ describe("schema validation", () => {
   it("tolerates extra fields from LLM", async () => {
     const result = await executeTool("read_file", { path: "/nonexistent/file.txt", extra_field: true });
     expect(result).not.toContain("invalid parameters");
+  });
+});
+
+describe("MCP numeric parameters", () => {
+  it("converts numeric strings according to the MCP schema", async () => {
+    const name = "mcp_dataforseo_serp_organic";
+    let received;
+    registerMcpTools([{
+      type: "function",
+      function: { name, parameters: { type: "object", properties: {
+        keyword: { type: "string" }, depth: { type: "integer" }, score: { type: "number" },
+      } } },
+    }], { [name]: async (args) => { received = args; return "ok"; } }, []);
+    noteMcpTool(name, "dataforseo");
+
+    expect(await executeTool(name, { keyword: "merge pdf", depth: "20", score: "0.5" })).toBe("ok");
+    expect(received).toEqual({ keyword: "merge pdf", depth: 20, score: 0.5 });
+    expect(await executeTool(name, { keyword: "merge pdf", depth: "20px" })).toContain('"depth" must be integer');
   });
 });
 

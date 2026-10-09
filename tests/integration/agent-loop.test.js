@@ -3,6 +3,7 @@ import { createTmpDir } from "../helpers/tmp-dir.js";
 import { createMockStore } from "../helpers/mock-store.js";
 import fs from "node:fs";
 import path from "node:path";
+import { createStdioSession } from "../../src/stdio/session.js";
 
 // Mock config
 vi.mock("../../src/config.js", () => ({
@@ -113,6 +114,63 @@ afterEach(() => {
 });
 
 describe("agent-loop integration", () => {
+  it("a busy stdio turn shows text, accepts a steer, and injects it before the next model call", async () => {
+    const file = path.join(tmp.path, "data.txt");
+    fs.writeFileSync(file, "fixture", "utf8");
+    const out = [];
+    const encoder = new TextEncoder();
+    let releaseFirst;
+    let calls = 0;
+    globalThis.fetch = vi.fn(async (_url, options) => {
+      calls++;
+      if (calls === 1) {
+        return { ok: true, body: new ReadableStream({
+          start(controller) {
+            controller.enqueue(encoder.encode('data: ' + JSON.stringify({ id: "g1", choices: [{ delta: { content: "Working " } }] }) + '\n\n'));
+            releaseFirst = () => {
+              controller.enqueue(encoder.encode('data: ' + JSON.stringify({ id: "g1", choices: [{ delta: { tool_calls: [{ index: 0, id: "call_1", function: { name: "read_file", arguments: JSON.stringify({ path: file }) } }] } }], usage: { prompt_tokens: 10, completion_tokens: 5 } }) + '\n\n'));
+              controller.enqueue(encoder.encode('data: [DONE]\n\n'));
+              controller.close();
+            };
+          },
+        }) };
+      }
+      const sent = JSON.parse(options.body);
+      expect(sent.messages.some((m) => m.role === "user" && String(m.content).includes("use the other file"))).toBe(true);
+      return { ok: true, body: buildSSEStream([
+        { id: "g2", choices: [{ delta: { content: "Changed course" } }], usage: { prompt_tokens: 20, completion_tokens: 4 } },
+      ]) };
+    });
+    const { initRegistry } = await import("../../src/tools/registry.js");
+    const { runAgent } = await import("../../src/agent/agent.js");
+    initRegistry(store);
+    const session = createStdioSession({
+      write: (e) => out.push(e), sessionId: "s1", model: "test-model",
+      run: (content, { observer, signal }) => runAgent([
+        { role: "system", content: "You are helpful" }, { role: "user", content },
+      ], {
+        signal,
+        onToken: observer.onToken,
+        onStreamEnd: observer.onStreamEnd,
+        onCheckQueue: observer.onCheckQueue,
+        onApiCall: observer.onApiCall,
+        onApiResponse: (_n, reply, usage) => observer.onReply(reply, usage),
+        onToolResult: (name, result, denied) => observer.onToolResult(name, result, denied),
+      }),
+    });
+    session.line(JSON.stringify({ type: "user", message: { content: "Read the file" } }));
+    for (let i = 0; i < 100 && !out.some((e) => e.type === "text_delta"); i++) await new Promise((r) => setTimeout(r, 5));
+    expect(out.some((e) => e.type === "text_delta" && e.delta.includes("Working"))).toBe(true);
+    expect(out.some((e) => e.type === "result")).toBe(false);
+    session.line(JSON.stringify({ type: "control_request", request_id: "steer-1", request: { subtype: "steer", text: "use the other file" } }));
+    expect(out.some((e) => e.type === "control_response" && e.response.response.status === "accepted")).toBe(true);
+    releaseFirst();
+    for (let i = 0; i < 100 && !out.some((e) => e.type === "result"); i++) await new Promise((r) => setTimeout(r, 5));
+    expect(calls).toBe(2);
+    expect(out.some((e) => e.type === "steer_status" && e.status === "delivered")).toBe(true);
+    expect(out.at(-1)).toMatchObject({ type: "result", result: "Changed course" });
+  });
+
   it("simple response — no tool calls", async () => {
     globalThis.fetch = vi.fn(async () => ({
       ok: true,
@@ -192,8 +250,8 @@ describe("agent-loop integration", () => {
     ];
     const toolCalls = [];
     const result = await runAgent(messages, {
-      onToolStart: (name, args) => toolCalls.push({ name, args }),
-      onToolResult: (name, result) => toolCalls.push({ name, result }),
+      onToolStart: (name, args, info) => toolCalls.push({ name, args, startId: info?.id }),
+      onToolResult: (name, result, denied, opts) => toolCalls.push({ name, result, resultId: opts?.id }),
     });
 
     expect(result.text).toBe("The file says: file content here");
@@ -202,6 +260,11 @@ describe("agent-loop integration", () => {
     const toolMsg = messages.find((m) => m.role === "tool");
     expect(toolMsg).toBeDefined();
     expect(toolMsg.content).toContain("file content here");
+    // Both callbacks name the call they belong to, so a listener can tell two
+    // calls of one tool apart (the stdio event stream keys its timings by it).
+    expect(toolMsg.tool_call_id).toBeTruthy();
+    expect(toolCalls.find((t) => "startId" in t).startId).toBe(toolMsg.tool_call_id);
+    expect(toolCalls.find((t) => "resultId" in t).resultId).toBe(toolMsg.tool_call_id);
   });
 
   it("think tool — onThought called", async () => {

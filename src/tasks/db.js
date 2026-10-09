@@ -4,7 +4,7 @@
 import Database from "better-sqlite3";
 import path from "node:path";
 import { mkdirSync } from "node:fs";
-import { homedir } from "node:os";
+import { homeStateDir } from "../data-dir.js";
 
 // FLINT_DATA_DIR moves this database too, like sessions/ and memory/.
 // It holds the message bus, and the bus recovers stale "processing" messages
@@ -12,9 +12,7 @@ import { homedir } from "node:os";
 // next instance, started for a different task, picked it up and worked on it
 // for fifteen minutes (SWE pilot, 2026-09-26). A subject with its own data
 // dir must not share a queue with anyone.
-const FLINT_DIR = process.env.FLINT_DATA_DIR
-  ? path.resolve(process.env.FLINT_DATA_DIR)
-  : path.join(homedir(), ".flint");
+const FLINT_DIR = homeStateDir();
 const DB_PATH = path.join(FLINT_DIR, "tasks.db");
 
 /** Where the task and message-bus database lives, for isolation checks. */

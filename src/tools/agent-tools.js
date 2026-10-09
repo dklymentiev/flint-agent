@@ -1,15 +1,16 @@
 import { spawn } from "node:child_process";
 import crypto from "node:crypto";
 import path from "node:path";
-import os from "node:os";
 import { config } from "../config.js";
 import { createLogger } from "../logging/logger.js";
+import { homeStateDir } from "../data-dir.js";
 import {
   printChildAgent, printChildSpawn, printChildEvent,
 } from "../ui/output.js";
 import { activeChildren } from "./process-tools.js";
 import { getTask, getTasksByGoalAndStatus, getTaskStats } from "../tasks/queries.js";
 import { apiUrl } from "../api/address.js";
+import { trackTempFile } from "../temp-tracker.js";
 
 const log = createLogger("agents");
 
@@ -146,7 +147,7 @@ export const agentToolDefs = [
  * Where a child agent on `port` keeps its data: under the parent's data
  * folder, one folder per port, so no two Flint processes share a queue.
  */
-export function childDataDir(port, parentDir = process.env.FLINT_DATA_DIR || path.join(os.homedir(), ".flint")) {
+export function childDataDir(port, parentDir = homeStateDir()) {
   return path.join(parentDir, "children", String(port));
 }
 
@@ -192,10 +193,18 @@ export function createAgentHandlers(store) {
       // parent's own long-running message back in the queue for anyone to run
       // again (found 2026-10-02, before a spawn for a research task).
       childEnv.FLINT_DATA_DIR = childDataDir(assignedPort);
-      // Pairing secret for parent↔child auth
+      // Pairing secret for parent↔child API auth. Always set — the parent
+      // sends tasks to the child over HTTP with this secret regardless of
+      // whether the parent itself runs a server.
       childEnv.AGENT_PAIRING_SECRET = pairingSecret;
-      // Parent port for orphan protection heartbeat
-      childEnv.AGENT_PARENT_PORT = String(config.port);
+      // Parent port for orphan protection heartbeat. Only set when the
+      // parent actually has an HTTP server — headless mode skips startServer
+      // (index.js), so there is nothing for the child to poll and the
+      // heartbeat would always fail, killing the child after ~60s
+      // (PARENT_CHECK_INTERVAL 20s × MAX_PARENT_MISSES 3).
+      if (!config.headless) {
+        childEnv.AGENT_PARENT_PORT = String(config.port);
+      }
       // Idle exit, off by default (0): a child lives as long as its parent,
       // and the parent heartbeat in index.js stops it when the parent is
       // gone, which is what the idle exit was first added for. A 60 s default
@@ -238,6 +247,7 @@ export function createAgentHandlers(store) {
           cmd,
         ];
         fs.writeFileSync(batPath, batLines.join("\r\n") + "\r\n");
+        trackTempFile(batPath);
 
         child = spawn("cmd.exe", ["/c", "start", `"Flint@${assignedPort}"`, batPath], {
           env: childEnv,

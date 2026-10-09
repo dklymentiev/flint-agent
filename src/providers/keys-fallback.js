@@ -2,10 +2,10 @@
 
 import { randomBytes, pbkdf2Sync } from "node:crypto";
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
-import { homedir } from "node:os";
 import path from "node:path";
+import { homeStateDir } from "../data-dir.js";
 
-const FLINT_DIR = path.join(homedir(), ".flint");
+const FLINT_DIR = homeStateDir();
 const SEED_FILE = path.join(FLINT_DIR, ".seed");
 const SALT_FILE = path.join(FLINT_DIR, ".salt");
 const ITERATIONS = 600000; // NIST SP 800-132 minimum for SHA-256

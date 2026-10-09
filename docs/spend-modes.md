@@ -29,7 +29,8 @@ which tools ask.
 | Token-saving advice in the system prompt | yes | no | no |
 
 Money limits are not part of a mode: `AGENT_MAX_COST` and
-`AGENT_SESSION_BUDGET` stay as set (unlimited by default).
+`AGENT_SESSION_BUDGET` stay as set (per message $5 by default, per session
+unlimited by default).
 
 The economy advice is a short section: prefer `search_in_files`, `glob` and
 reads with offset/limit over whole files; read a page once and note what

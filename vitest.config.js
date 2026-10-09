@@ -34,7 +34,7 @@ export default defineConfig({
       // console the way a terminal does.
       CI: "false",
       FLINT_OWN_ENV: "0",
-      FLINT_DATA_DIR: fs.mkdtempSync(path.join(os.tmpdir(), "flint-test-data-")),
+      FLINT_TEST_MODE: "unit",
       FLINT_TEST_PERMISSIONS_FILE: SANDBOX_PERMS,
       HOME: SANDBOX_HOME,
       USERPROFILE: SANDBOX_HOME,

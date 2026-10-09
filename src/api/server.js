@@ -136,14 +136,17 @@ export function startServer(port, store, processMessage, opts = {}) {
             return;
           }
         }
-        // Enable autonomous mode via API
-        if (body.autonomous) {
-          app.autonomous = true;
-          try {
-            const { resetAutonomous } = await import("../bus/drain-loop.js");
-            resetAutonomous();
-          } catch {}
-        }
+        // Enable autonomous mode via API — opt-in per message.
+        // This sets app.apiSelfContinue, NOT app.autonomous. app.autonomous
+        // is the TUI /auto flag and must never be touched by API traffic:
+        // a previous else-branch reset app.autonomous=false here, which
+        // killed a /auto session the operator had started in the console
+        // whenever any API message arrived without autonomous=true.
+        //
+        // API self-continue is decided per-message: without body.autonomous
+        // the message stops after one turn even if /auto is running in the
+        // TUI. The two doors cannot disagree.
+        app.apiSelfContinue = !!body.autonomous;
 
         // Reserved slash commands — intercept BEFORE the bus, mirroring the
         // TUI path at src/index.js:508. Without this, messages like /mcp or
@@ -290,6 +293,8 @@ export function startServer(port, store, processMessage, opts = {}) {
               // agent actually did without toolCalls. Both were being dropped here.
               response.stop_reason = asyncResult.stop_reason;
               response.toolCalls = asyncResult.toolCalls || [];
+              response.repoClaimGap = asyncResult.repoClaimGap || false;
+              response.truncated_at = asyncResult.truncated_at || null;
               if (asyncResult.error) response.error = asyncResult.error;
             } else {
               // Fallback: DB result (may be truncated to 500 chars)

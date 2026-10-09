@@ -8,8 +8,8 @@
 // A variable for a single setting still wins over the mode.
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { homedir } from "node:os";
 import path from "node:path";
+import { homeStateDir } from "./data-dir.js";
 
 export const SPEND_NAMES = ["economy", "normal", "generous"];
 export const DEFAULT_SPEND = "normal";
@@ -56,11 +56,8 @@ export const SPEND_LEVELS = {
 };
 
 function spendFile() {
-  const dir = process.env.FLINT_DATA_DIR ? path.resolve(process.env.FLINT_DATA_DIR) : path.join(homedir(), ".flint");
-  return path.join(dir, "spend.json");
+  return path.join(homeStateDir(), "spend.json");
 }
-
-/** A level name from loose input ("e", "Economy", "gen"), or null. */
 export function parseSpendName(input) {
   const s = String(input || "").trim().toLowerCase();
   if (!s) return null;

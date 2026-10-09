@@ -8,13 +8,11 @@
 // Internal task reference removed.
 
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync, unlinkSync } from "node:fs";
-import { join, basename, resolve } from "node:path";
-import { homedir } from "node:os";
+import { join, basename } from "node:path";
+import { homeStateDir } from "../data-dir.js";
 import { insertSkill, getAllSkills, getSkill, deleteSkill, indexEntry } from "./sqlite-store.js";
 
-const SKILLS_DIR = process.env.FLINT_DATA_DIR
-  ? join(resolve(process.env.FLINT_DATA_DIR), "memory", "skills")
-  : join(homedir(), ".flint", "memory", "skills");
+const SKILLS_DIR = join(homeStateDir(), "memory", "skills");
 const MAX_SKILLS = 50;
 
 function ensureDir() {

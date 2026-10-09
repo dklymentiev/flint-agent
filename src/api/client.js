@@ -155,8 +155,8 @@ export async function chatCompletion(messages, tools, onToken, {
     try {
       const { writeFileSync, existsSync, mkdirSync } = await import("node:fs");
       const { join } = await import("node:path");
-      const { homedir } = await import("node:os");
-      const dir = join(homedir(), ".flint", "agent-prompt-snapshots");
+      const { homeStateDir } = await import("../data-dir.js");
+      const dir = join(homeStateDir(), "agent-prompt-snapshots");
       if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
       const ts = Date.now();
       const file = join(dir, `${ts}.json`);
@@ -220,6 +220,18 @@ export async function chatCompletion(messages, tools, onToken, {
         err.isQuotaError = true;
         throw err;
       }
+      // A 404 from a chat endpoint is almost always "this model is not served
+      // here" (retired id, Ollama model not pulled). A bare "API 404" left the
+      // tester guessing which model, so say it and say what to do.
+      if (response.status === 404) {
+        const hint = provider?.id === "ollama"
+          ? `If it is not pulled, run: ollama pull ${effectiveModel}. Otherwise pick another with /model.`
+          : "It may have been retired. Pick another with /model.";
+        throw Object.assign(
+          new Error(`API 404: model '${effectiveModel}' was not found on '${provider?.id || "unknown"}'. ${hint} Provider said: ${text.slice(0, 300)}`),
+          { statusCode: 404, isModelNotFound: true },
+        );
+      }
       // The status travels with the error: a caller deciding whether to retry
       // needs to tell a client error from a transient one, and parsing it back
       // out of the message is not a decision, it is a guess.
@@ -241,9 +253,18 @@ export async function chatCompletion(messages, tools, onToken, {
     }
 
     // The caller does not record anything. Two sources were declared and never
-    // wired to a counter before this moved here, both times
-    // because recording was somebody else's job.
-    recordUsage(source, result.usage);
+    // wired to a counter before this moved here, both times because recording
+    // was somebody else's job.
+    const entry = recordUsage(source, result.usage);
+    // Push the call's delta into the session store right now, so the cost
+    // shown by the status line, /status and the API usage block climbs after
+    // every call during a turn instead of only after it ends. The turn-end
+    // drain is an empty no-op for these calls (every call was already pushed),
+    // so this is the single place each call is charged to the session total.
+    if (entry) {
+      const { store } = await import("../store/index.js");
+      store.getState().applyUsage(source, entry);
+    }
     return result;
   } finally {
     cleanup();

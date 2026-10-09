@@ -2,6 +2,7 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { rmSync, existsSync } from "node:fs";
 import path from "node:path";
+import os from "node:os";
 
 vi.mock("../../src/logging/logger.js", () => ({
   createLogger: () => ({ debug() {}, info() {}, warn() {}, error() {} }),
@@ -13,7 +14,7 @@ const { mcpInlineMax } = await import("../../src/agent/intent.js");
 const { swapSettings, swapFromTokens, convSettings } = await import("../../src/agent/swap.js");
 const { statusText } = await import("../../src/components/LiveZone.js");
 
-const saved = () => path.join(process.env.FLINT_DATA_DIR, "spend.json");
+const saved = () => path.join(os.homedir(), ".flint", "spend.json");
 afterEach(() => { if (existsSync(saved())) rmSync(saved()); delete process.env.FLINT_SPEND; });
 
 describe("choosing a level", () => {

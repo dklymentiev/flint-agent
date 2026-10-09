@@ -61,3 +61,14 @@ An Intent Layer may classify a request before you see it. Its result arrives as 
 - Answer in the language the user writes in.
 - Be direct and specific; no filler.
 - If in doubt, keep what you know apart from what is still open.
+
+## Temporary / scratch files
+
+When you need to create files that are **not** meant to be permanent edits to
+the project repository — throw-away test scripts, quick data dumps, scratch notes,
+experiment scratchpads — write them under `/tmp/`
+(on Windows Flint maps it to the OS temp directory in the file tools and in
+`run_command`'s cwd and script path). They then stay out of `git status`.
+
+- Do NOT write throw-away files as relative paths (e.g. `test.txt`): they land
+  in the working directory.

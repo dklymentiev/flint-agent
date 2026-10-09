@@ -1,9 +1,11 @@
 import chalk from "chalk";
+import path from "node:path";
 import { listSessions } from "./sessions.js";
 import { migrateEnvKey, setKey, hasKey } from "./providers/keys.js";
 import { listProviders, getProvider } from "./providers/registry.js";
 import { setActiveProvider, setLastModel } from "./providers/state.js";
 import { config, needsFirstRunSetup } from "./config.js";
+import { confirmWizardModel } from "./model-availability.js";
 
 // -- CLI argument parsing --
 
@@ -14,16 +16,33 @@ export function getArgValue(name) {
 
 export function parseCLI() {
   const args = process.argv;
+  // --data-dir is applied by data-dir-flag.js, the first import of index.js.
   if (args.includes("--list")) return { action: "list" };
   if (args.includes("--headless")) {
     const taskIdx = args.indexOf("--task");
     const task = (taskIdx !== -1 && args[taskIdx + 1]) ? args[taskIdx + 1] : null;
     const cwdIdx = args.indexOf("--cwd");
-    const cwd = (cwdIdx !== -1 && args[cwdIdx + 1]) ? args[cwdIdx + 1] : null;
+    const cwd = (cwdIdx !== -1 && args[cwdIdx + 1]) ? path.resolve(args[cwdIdx + 1]) : null;
     const budgetIdx = args.indexOf("--budget");
     const budget = (budgetIdx !== -1 && args[budgetIdx + 1]) ? parseFloat(args[budgetIdx + 1]) : null;
-    return { action: "headless", task, cwd, budget };
+    const timeLimitIdx = args.indexOf("--time-limit");
+    const timeLimit = (timeLimitIdx !== -1 && args[timeLimitIdx + 1]) ? parseFloat(args[timeLimitIdx + 1]) : null;
+    const sessionIdx = args.indexOf("--session");
+    const session = (sessionIdx !== -1 && args[sessionIdx + 1]) ? args[sessionIdx + 1] : null;
+    const systemPromptIdx = args.indexOf("--system-prompt");
+    const systemPrompt = (systemPromptIdx !== -1 && args[systemPromptIdx + 1]) ? args[systemPromptIdx + 1] : null;
+    const systemPromptFileIdx = args.indexOf("--system-prompt-file");
+    const systemPromptFile = (systemPromptFileIdx !== -1 && args[systemPromptFileIdx + 1]) ? args[systemPromptFileIdx + 1] : null;
+    const appendSystemPromptIdx = args.indexOf("--append-system-prompt");
+    const appendSystemPrompt = (appendSystemPromptIdx !== -1 && args[appendSystemPromptIdx + 1]) ? args[appendSystemPromptIdx + 1] : null;
+    const appendSystemPromptFileIdx = args.indexOf("--append-system-prompt-file");
+    const appendSystemPromptFile = (appendSystemPromptFileIdx !== -1 && args[appendSystemPromptFileIdx + 1]) ? args[appendSystemPromptFileIdx + 1] : null;
+    return { action: "headless", task, cwd, budget, timeLimit, id: session, systemPrompt, systemPromptFile, appendSystemPrompt, appendSystemPromptFile };
   }
+  // Minimal runtime probe: verifies key, model, and tool round-trip without
+  // running a full task. Exits with 0 (ok), 10 (no key), 11 (model did not
+  // answer), 12 (tool did not round-trip).
+  if (args.includes("--check")) return { action: "check" };
   if (args.includes("--new")) return { action: "new" };
   if (args.includes("--last")) return { action: "last" };
   const idx = args.indexOf("--session");
@@ -47,6 +66,9 @@ export async function runListSessions() {
 }
 
 export async function migrateKeys() {
+  // In headless mode the key comes from the environment and must not be
+  // persisted to disk. The caller did not ask for a key file to be created.
+  if (config.headless) return;
   await migrateEnvKey("OPENROUTER_API_KEY", "openrouter");
   await migrateEnvKey("OPENAI_API_KEY", "openai");
   await migrateEnvKey("ANTHROPIC_API_KEY", "anthropic");
@@ -84,7 +106,11 @@ export async function runFirstRunSetup(cli) {
     config.provider = "ollama";
     setActiveProvider("ollama");
     config.model = "llama3.2";
-    console.log(chalk.green("\n  Selected Ollama. Make sure it's running on localhost:11434.\n"));
+    console.log(chalk.green("\n  Selected Ollama (localhost:11434).\n"));
+    // Ollama answers 404 for a model that is not pulled; check before the
+    // first message does.
+    config.model = await confirmWizardModel("ollama", config.model, { ask });
+    setLastModel("ollama", config.model);
   } else if (idx >= 0 && idx < providers.length) {
     const selected = providers[idx];
     // Owner, 2026-10-01: the spinner hid this prompt, a stray "1" was saved as
@@ -102,8 +128,11 @@ export async function runFirstRunSetup(cli) {
       config.provider = selected.id;
       config.apiKey = trimmedKey;
       setActiveProvider(selected.id);
-      config.model = selected.defaultModel;
-      console.log(chalk.green(`\n  Key saved (encrypted). Provider: ${selected.name}, Model: ${selected.defaultModel}\n`));
+      // The default may have been retired since this release; ask the
+      // provider with the new key and offer a live model if so.
+      config.model = await confirmWizardModel(selected.id, selected.defaultModel, { ask });
+      if (config.model !== selected.defaultModel) setLastModel(selected.id, config.model);
+      console.log(chalk.green(`\n  Key saved (encrypted). Provider: ${selected.name}, Model: ${config.model}\n`));
     } else {
       console.log(chalk.yellow("\n  No key entered. You can add one later with /key <provider>.\n"));
     }

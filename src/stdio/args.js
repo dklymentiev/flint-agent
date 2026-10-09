@@ -18,7 +18,7 @@ const VALUE_FLAGS = new Set([
   "--append-system-prompt", "--append-system-prompt-file", "--mcp-config", "--input-format",
   "--output-format", "--cwd", "--max-turns", "--add-dir", "--permission-mode",
   "--allowedTools", "--allowed-tools", "--disallowedTools", "--disallowed-tools",
-  "--fallback-model", "--settings",
+  "--fallback-model", "--settings", "--data-dir",
 ]);
 
 /** Session ids become file names: letters, digits, dash and underscore only. */
@@ -65,6 +65,7 @@ export function parseStdioArgs(argv) {
     appendSystemPromptFile: values["--append-system-prompt-file"] ?? null,
     mcpConfig: values["--mcp-config"] ?? null,
     cwd: values["--cwd"] ?? null,
+    dataDir: values["--data-dir"] ?? null,
     skipPermissions: flags.has("--dangerously-skip-permissions") || values["--permission-mode"] === "bypassPermissions",
     verbose: flags.has("--verbose"),
   };

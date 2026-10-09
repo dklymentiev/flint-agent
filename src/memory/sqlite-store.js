@@ -4,48 +4,80 @@
 // Migration: reads existing JSONL on first run, inserts into tables, renames JSONL to .migrated.
 //
 
+import os from "node:os";
 import Database from "better-sqlite3";
 import { existsSync, mkdirSync, readFileSync, renameSync } from "node:fs";
-import { join, resolve } from "node:path";
-import { homedir } from "node:os";
+import path from "node:path";
+import { join } from "node:path";
 import { createRequire } from "node:module";
+import { homeStateDir } from "../data-dir.js";
 const require = createRequire(import.meta.url);
 
 // FLINT_DATA_DIR moves the memory database off the shared default, so a bench
 // subject does not read and write the operator's own memory. On 2026-09-21 the
 // readiness subject and the live agent shared this file, and so did the unit
 // test that clears the facts table in beforeEach.
-const DIR = process.env.FLINT_DATA_DIR
-  ? join(resolve(process.env.FLINT_DATA_DIR), "memory")
-  : join(homedir(), ".flint", "memory");
-const DB_PATH = join(DIR, "index.sqlite");
+//
+// Re-resolved on every call: a stale cache would freeze the first value of
+// FLINT_DATA_DIR (or the first mocked homedir()) for the lifetime of the
+// process, defeating test isolation that changes env vars or mocks os.homedir()
+// after import.
+function getDir() {
+  return join(homeStateDir(), "memory");
+}
+
+function getDbPath() {
+  return join(getDir(), "index.sqlite");
+}
 
 let _db = null;
 let _vecEnabled = false;
 const EMBEDDING_PROVIDER = process.env.AGENT_MEMORY_EMBEDDING || "none";
 const EMBEDDING_DIM = 384; // nomic-embed default; OpenAI ada = 1536
 
-function ensureDir() {
-  if (!existsSync(DIR)) mkdirSync(DIR, { recursive: true });
+function ensureDir(dir = getDir()) {
+  if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
 }
 
 /** Where this instance keeps its memory. Answers "which database am I on?". */
 export function memoryDbPath() {
-  return DB_PATH;
+  return getDbPath();
+}
+
+/** True when child is dir itself or lies inside it (a path boundary, not a string prefix). */
+function isInside(child, dir) {
+  const rel = path.relative(dir, child);
+  if (rel === "") return true;
+  return !rel.startsWith("..") && !path.isAbsolute(rel);
+}
+
+/**
+ * Under a test runner the memory directory (the one getDir() resolved from
+ * FLINT_DATA_DIR, else from os.homedir(), which follows USERPROFILE on
+ * Windows and HOME elsewhere) must lie inside the temp directory. v1.14.5
+ * threw without FLINT_DATA_DIR; 1.14.6 looked only at HOME, so FLINT_DATA_DIR
+ * pointing at the real ~/.flint passed. Checking the resolved directory covers
+ * both ways of redirecting, with a path boundary rather than a string prefix.
+ */
+export function assertTestSandbox(dir, env = process.env) {
+  if (env.VITEST !== "true") return;
+  const norm = (p) => (process.platform === "win32" ? path.resolve(p).toLowerCase() : path.resolve(p));
+  const target = norm(dir);
+  const tmp = norm(os.tmpdir());
+  const bad = (why) => {
+    throw new Error(
+      "Refusing to open real ~/.flint database under test runner: " + why +
+      ' ("' + dir + '"). Point FLINT_DATA_DIR, or HOME and USERPROFILE, at a temp directory in the vitest config.'
+    );
+  };
+  if (!isInside(target, tmp) || target === tmp) bad("not inside the temp directory " + tmp);
 }
 
 export function getDb() {
   if (_db) return _db;
-  // Guard: under a test runner, refuse to touch the real home database.
-  // FLINT_DATA_DIR must be set to a temp directory by the test config.
-  if (process.env.VITEST === "true" && !process.env.FLINT_DATA_DIR) {
-    throw new Error(
-      "Refusing to open real ~/.flint database under test runner. " +
-      "Set FLINT_DATA_DIR to a temp directory in your vitest config."
-    );
-  }
+  assertTestSandbox(getDir());
   ensureDir();
-  _db = new Database(DB_PATH);
+  _db = new Database(getDbPath());
   _db.pragma("journal_mode = WAL");
   _db.pragma("foreign_keys = ON");
 
@@ -387,7 +419,7 @@ export function migrateFromJsonl() {
   const db = getDb();
   let migrated = { reflections: 0, patterns: 0 };
 
-  const reflFile = join(DIR, "reflections.jsonl");
+  const reflFile = join(getDir(), "reflections.jsonl");
   if (existsSync(reflFile) && countReflections() === 0) {
     const lines = readFileSync(reflFile, "utf-8").split("\n").filter(l => l.trim());
     const insert = db.prepare(`
@@ -407,7 +439,7 @@ export function migrateFromJsonl() {
     renameSync(reflFile, reflFile + ".migrated");
   }
 
-  const patFile = join(DIR, "patterns.jsonl");
+  const patFile = join(getDir(), "patterns.jsonl");
   if (existsSync(patFile) && countPatterns() === 0) {
     const lines = readFileSync(patFile, "utf-8").split("\n").filter(l => l.trim());
     const insert = db.prepare(`
@@ -650,4 +682,4 @@ export function closeDb() {
   if (_db) { _db.close(); _db = null; _vecEnabled = false; }
 }
 
-export const __internal = { DIR, DB_PATH, EMBEDDING_DIM, isVecEnabled: () => _vecEnabled };
+export const __internal = { getDir, getDbPath, EMBEDDING_DIM, isVecEnabled: () => _vecEnabled };

@@ -2,6 +2,11 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { createMockStore } from "../../helpers/mock-store.js";
 import { activeChildren } from "../../../src/tools/process-tools.js";
 
+// True if a process is currently running (signal 0 succeeds).
+function isAlive(pid) {
+  try { process.kill(pid, 0); return true; } catch { return false; }
+}
+
 // Mock UI output functions — they write to terminal, not needed in tests
 vi.mock("../../../src/ui/output.js", () => ({
   printProcessStart: vi.fn(),
@@ -178,6 +183,64 @@ describe("run_command", () => {
     const result = await h.run_command({ command: 'printf "\\x1b[31mred\\x1b[0m"' });
     expect(result).not.toContain("\x1b[");
     expect(result).toContain("red");
+  });
+
+  // ── background `&` must NOT be killed in non-headless (interactive) mode ──
+  // Regression for the rejected trap-on-every-command fix: if a trap were
+  // injected into every run_command, an operator's intentionally backgrounded
+  // `cmd &` would be killed when the shell exits. In non-headless mode the
+  // trap must not be present, so the backgrounded process outlives the shell
+  // and a plain command keeps a clean (zero) exit code.
+  it("does not kill an operator's `&` background process when not headless", async () => {
+    const os = await import("node:os");
+    const path = await import("node:path");
+    const fs = await import("node:fs");
+    const tmpBase = fs.mkdtempSync(path.join(os.tmpdir(), "flint-amp-interactive-"));
+    const script = path.join(tmpBase, "sleeper.js");
+    const pidFile = path.join(tmpBase, "pid.txt");
+    // Sleeper writes its own PID then stays alive.
+    fs.writeFileSync(script,
+      'require("fs").writeFileSync(process.argv[2], String(process.pid)); setInterval(() => {}, 1000);');
+    const escapedScript = process.platform === "win32"
+      ? `"${script}"` : `"${script}"`;
+    // Background it with `&` exactly like an operator would. No trap should be
+    // injected, so the child must survive the shell exiting.
+    const h = await getHandlers();
+    const result = await h.run_command({
+      command: `node ${escapedScript} "${pidFile}" > /dev/null 2>&1 & echo marker`,
+    });
+    expect(result).toContain("marker");
+    // Wait briefly for the PID file to appear, then assert the child is alive.
+    const until = Date.now() + 2000;
+    while (!fs.existsSync(pidFile) && Date.now() < until) { /* spin */ }
+    expect(fs.existsSync(pidFile), "backgrounded child never wrote its PID").toBe(true);
+    const pid = Number(fs.readFileSync(pidFile, "utf-8").trim());
+    // Give it a moment after the shell exited.
+    const alive = await new Promise((resolve) => {
+      setTimeout(() => {
+        try { process.kill(pid, 0); resolve(true); } catch { resolve(false); }
+      }, 200);
+    });
+    expect(alive, "an operator `&` process was killed in non-headless mode — the trap leaked into interactive runs").toBe(true);
+    // Cleanup: kill the surviving child first, then wait for it to actually
+    // exit before removing its cwd (a SIGKILL'd tree on Windows still holds
+    // the directory briefly and rmSync races into EBUSY).
+    try { process.kill(pid, "SIGKILL"); } catch {}
+    const deadline = Date.now() + 3000;
+    while (isAlive(pid) && Date.now() < deadline) {
+      await new Promise(r => setTimeout(r, 50));
+    }
+    fs.rmSync(tmpBase, { recursive: true, force: true });
+  }, 15000);
+
+  // And the flip side: a normal command returns a clean zero exit code in
+  // non-headless mode (the trap, when active in headless mode, must not
+  // corrupt the exit code of ordinary commands).
+  it("returns a clean exit code for a normal command when not headless", async () => {
+    const h = await getHandlers();
+    const result = await h.run_command({ command: "echo ok" });
+    expect(result.trim()).toBe("ok");
+    expect(result).not.toMatch(/Error/);
   });
 
   // RX-3.1 regression: the MAX_OUTPUT guard used to call a non-existent

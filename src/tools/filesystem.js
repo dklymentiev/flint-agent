@@ -24,6 +24,30 @@ export function normalizeTmpPath(filePath) {
   return filePath;
 }
 
+/**
+ * On Windows, Git Bash interprets /c/Projects/x as drive C:\Projects\x.
+ * Node.js path.resolve treats /c/ as a literal "c" subdirectory of the
+ * current drive root, so /c/Projects/x resolves to C:\c\Projects\x — a
+ * different folder. This is the split-brain bug: run_command (bash) and
+ * file tools (Node fs) agree on neither the location nor that they differ.
+ *
+ * On Linux/macOS /c/ is a real absolute path and must not be touched.
+ *
+ * Returns an error message string when the path is a shell-style /drive/ path
+ * on Windows, or null when the path is fine.
+ */
+export function shellPathError(filePath) {
+  if (process.platform !== "win32") return null;
+  const normalized = filePath.replace(/\\/g, "/");
+  // Match /c/... , /D/something, etc. — a leading slash then a single
+  // letter then a slash, like Git Bash /drive-letter syntax.
+  if (/^\/[a-zA-Z]\//.test(normalized)) {
+    const drive = normalized[1].toUpperCase();
+    return `On Windows, use drive-letter paths like "C:/.../" or "C:\\...\\" instead of "/${normalized[1]}/...". The /${normalized[1]}/ form is a shell-ism (Git Bash only): Node.js resolves it to a literal "C:\\${normalized[1]}\\..." subdirectory, not drive ${drive}:.`;
+  }
+  return null;
+}
+
 // Denied paths — agent cannot write to these directories (e.g. its own source)
 // Inherited from parent agent via AGENT_DENIED_PATHS env var
 let deniedPaths = (process.env.AGENT_DENIED_PATHS || "")
@@ -60,7 +84,7 @@ function resolveReadPath(filePath) {
 function resolveWritePath(filePath) {
   filePath = normalizeTmpPath(filePath);
   if (path.isAbsolute(filePath)) return path.resolve(filePath);
-  const workdir = config.workdir || config.projectRoot || process.cwd();
+  const workdir = config.workdir || process.cwd();
   // Strip leading "workspace/" if workdir already IS the workspace dir
   // Models see "workspace/" in list_directory and include it in paths,
   // but workdir already points to .../workspace/ → double nesting
@@ -76,8 +100,23 @@ function resolvePath(filePath) {
   return resolveReadPath(filePath);
 }
 
-function checkAccess(filePath) {
-  const resolved = resolvePath(filePath);
+/** Guard against shell-style /drive/ paths on Windows. Returns an error string
+ * if the path uses Git Bash /c/... syntax (which Node resolves to a literal
+ * "C:\c\..." subdirectory, not drive C:), or null if the path is fine.
+ * This is the single chokepoint: deleting the shellPathError call inside
+ * guardShellPath makes the check a no-op and tests go red. */
+function guardShellPath(filePath) {
+  const err = shellPathError(filePath || "");
+  return err;
+}
+
+function checkAccess(filePath, opts) {
+  // When checking a write path, resolve with resolveWritePath (relative to
+  // workdir) instead of resolveReadPath (relative to baseDir/projectRoot).
+  // This prevents write_file from escaping allowedPaths due to resolution
+  // divergence between read and write paths. Deleting the opts.forWrite
+  // check reverts to the read path — write checks could be bypassed.
+  const resolved = (opts && opts.forWrite) ? resolveWritePath(filePath) : resolvePath(filePath);
 
   // Check deny-list first (e.g. Flint's own source during /auto)
   if (deniedPaths.length) {
@@ -117,11 +156,11 @@ export const tools = [
     type: "function",
     function: {
       name: "write_file",
-      description: "Write files to disk. For 1 file: pass path and content. For multiple files: pass files array. Each call = 1 iteration — always batch when creating 2+ files.",
+      description: "Write files to disk. For 1 file: pass path and content. For multiple files: pass files array. Each call = 1 iteration — always batch when creating 2+ files. For temporary/scratch files use /tmp/ paths — they redirect to the OS temp directory and won't appear in git status.",
       parameters: {
         type: "object",
         properties: {
-          path: { type: "string", description: "File path (single-file mode)" },
+          path: { type: "string", description: "File path. For temporary/scratch files use /tmp/ — on Windows this redirects to the OS temp dir, keeping scratch files out of git status. Relative paths resolve into the task repository." },
           content: { type: "string", description: "File content (single-file mode)" },
           files: {
             type: "array",
@@ -278,8 +317,20 @@ export const tools = [
 
 export const handlers = {
   async read_file({ path: filePath, offset, limit }) {
-    checkAccess(filePath);
-    const resolved = resolvePath(filePath);
+    const shellErr = guardShellPath(filePath);
+    if (shellErr) return shellErr;
+    checkAccess(filePath, { forWrite: false });
+    // Same base as write_file, so a file the agent just wrote is found. A
+    // relative path that only exists under the old read base (baseDir or the
+    // install root) is still read from there instead of failing.
+    let resolved = resolveWritePath(filePath);
+    if (!path.isAbsolute(normalizeTmpPath(filePath))) {
+      const legacy = resolveReadPath(filePath);
+      if (legacy !== resolved && !(await fs.access(resolved).then(() => true, () => false))
+          && await fs.access(legacy).then(() => true, () => false)) {
+        resolved = legacy;
+      }
+    }
     const ext = path.extname(resolved).toLowerCase();
     const binaryExts = [".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp", ".ico", ".svg",
       ".mp3", ".mp4", ".wav", ".avi", ".mkv", ".mov", ".flac",
@@ -372,23 +423,32 @@ export const handlers = {
     if (!files || !files.length) return "Error: files array is required. Example: write_file({files: [{path: 'a.js', content: '...'}]})";
     if (files.length > config.maxBatchFiles) return `Error: max ${config.maxBatchFiles} files per call`;
     const results = [];
+    const writtenTo = [];
     for (const { path: fp, content: fc } of files) {
+      const shellErr = guardShellPath(fp);
+      if (shellErr) {
+        results.push(`✗ ${fp}: ${shellErr}`);
+        continue;
+      }
       try {
-        checkAccess(fp);
+        checkAccess(fp, { forWrite: true });
         await saveCheckpoint(fp, "write");
         const resolved = resolveWritePath(fp);
         await fs.mkdir(path.dirname(resolved), { recursive: true });
         await fs.writeFile(resolved, fc, "utf-8");
         results.push(`✓ ${fp}`);
+        writtenTo.push(resolved);
       } catch (err) {
         results.push(`✗ ${fp}: ${err.message}`);
       }
     }
-    if (files.length === 1) return results[0].startsWith("✓") ? `File written: ${files[0].path}` : results[0];
+    if (files.length === 1) return results[0].startsWith("✓") ? `File written: ${writtenTo[0]}` : results[0];
     return `${results.filter(r => r.startsWith("✓")).length}/${files.length} files written:\n${results.join("\n")}`;
   },
 
   async list_directory({ path: dirPath }) {
+    const shellErr = guardShellPath(dirPath);
+    if (shellErr) return shellErr;
     checkAccess(dirPath);
     const resolved = resolvePath(dirPath);
     const entries = await fs.readdir(resolved, { withFileTypes: true });
@@ -400,15 +460,29 @@ export const handlers = {
   },
 
   async create_directory({ path: dirPath }) {
-    checkAccess(dirPath);
+    const shellErr = guardShellPath(dirPath);
+    if (shellErr) return shellErr;
+    try {
+      checkAccess(dirPath, { forWrite: true });
+    } catch (err) {
+      return err.message;
+    }
     const resolved = resolveWritePath(dirPath);
     await fs.mkdir(resolved, { recursive: true });
     return `Directory created: ${resolved}`;
   },
 
   async copy_file({ source, destination }) {
-    checkAccess(source);
-    checkAccess(destination);
+    const shellErrS = guardShellPath(source);
+    if (shellErrS) return shellErrS;
+    const shellErrD = guardShellPath(destination);
+    if (shellErrD) return shellErrD;
+    try {
+      checkAccess(source, { forWrite: true });
+      checkAccess(destination, { forWrite: true });
+    } catch (err) {
+      return err.message;
+    }
     const src = resolvePath(source);
     const dst = resolveWritePath(destination);
     await fs.mkdir(path.dirname(dst), { recursive: true });
@@ -417,8 +491,16 @@ export const handlers = {
   },
 
   async move_file({ source, destination }) {
-    checkAccess(source);
-    checkAccess(destination);
+    const shellErrS = guardShellPath(source);
+    if (shellErrS) return shellErrS;
+    const shellErrD = guardShellPath(destination);
+    if (shellErrD) return shellErrD;
+    try {
+      checkAccess(source, { forWrite: true });
+      checkAccess(destination, { forWrite: true });
+    } catch (err) {
+      return err.message;
+    }
     const src = resolvePath(source);
     const dst = resolveWritePath(destination);
     await fs.mkdir(path.dirname(dst), { recursive: true });
@@ -427,6 +509,8 @@ export const handlers = {
   },
 
   async search_in_files({ pattern, path: searchPath, glob: globPattern, max_results: maxResults = 30 }) {
+    const shellErr = guardShellPath(searchPath);
+    if (shellErr) return shellErr;
     checkAccess(searchPath || ".");
     const dir = resolvePath(searchPath || ".");
     const regex = new RegExp(pattern, "i");
@@ -510,6 +594,8 @@ export const handlers = {
   },
 
   async view_image({ path: filePath }) {
+    const shellErr = guardShellPath(filePath);
+    if (shellErr) return shellErr;
     checkAccess(filePath);
     const resolved = resolvePath(filePath);
     const ext = path.extname(resolved).toLowerCase().replace(".", "");
@@ -524,7 +610,9 @@ export const handlers = {
   },
 
   async edit_file({ path: filePath, old_text, new_text, all }) {
-    checkAccess(filePath);
+    const shellErr = guardShellPath(filePath);
+    if (shellErr) return shellErr;
+    checkAccess(filePath, { forWrite: true });
     await saveCheckpoint(filePath, "edit");
     const resolved = resolveWritePath(filePath);
     const content = await fs.readFile(resolved, "utf-8");
@@ -571,6 +659,8 @@ export const handlers = {
   },
 
   async glob({ pattern, path: basePath }) {
+    const shellErr = guardShellPath(basePath);
+    if (shellErr) return shellErr;
     checkAccess(basePath || ".");
     const base = resolvePath(basePath || ".");
     const SKIP_DIRS = new Set(["node_modules", ".git", ".next", "dist", "build", "__pycache__", ".cache"]);
@@ -601,7 +691,9 @@ export const handlers = {
   },
 
   async delete_file({ path: filePath }) {
-    checkAccess(filePath);
+    const shellErr = guardShellPath(filePath);
+    if (shellErr) return shellErr;
+    checkAccess(filePath, { forWrite: true });
     await saveCheckpoint(filePath, "delete");
     const resolved = resolveWritePath(filePath);
     const stat = await fs.stat(resolved);

@@ -224,6 +224,95 @@ describe("CarefulMenu: choosing with Enter or with a letter", () => {
     }
   });
 
+  // The tests above wait 50 ms between keys. In 50 ms ink has both re-rendered
+  // the menu and re-registered its useInput handler with a fresh closure, so
+  // they stayed green when f9edc9c (read the index from a ref) was reverted.
+  // The defect that commit fixed lives in a narrower window: the arrow key has
+  // been rendered, but the effect that swaps the handler has not run yet. One
+  // turn of the timer queue lands there: React commits the render from a
+  // setImmediate, the timer fires next, the effect comes after it.
+  // Measured 2026-10-08: with the fix green on every run, with the handler
+  // reading the `index` state again red on every run.
+  const afterRenderBeforeEffect = () => new Promise((r) => setTimeout(r, 0));
+
+  it("Enter right behind arrow-down picks the moved-to option, not the one before it", async () => {
+    const chosen = [];
+    const { stdin, unmount } = await renderMenu((level) => chosen.push(level));
+    try {
+      stdin.write("\x1B[B");
+      await afterRenderBeforeEffect();
+      stdin.write("\r");
+      await tick();
+      expect(chosen, "Enter used the index from before the arrow key").toEqual(["permissive"]);
+    } finally {
+      unmount();
+    }
+  });
+
+  it("Enter right behind arrow-up picks the moved-to option, not the one before it", async () => {
+    const chosen = [];
+    const { stdin, unmount } = await renderMenu((level) => chosen.push(level));
+    try {
+      stdin.write("\x1B[A");
+      await afterRenderBeforeEffect();
+      stdin.write("\r");
+      await tick();
+      expect(chosen, "Enter used the index from before the arrow key").toEqual(["safe"]);
+    } finally {
+      unmount();
+    }
+  });
+
+  // KNOWN DEFECTS, not guarded behaviour. `it.fails` is green while the defect
+  // is there and turns red the day it is fixed: then change it to `it`.
+  //
+  // The ref from f9edc9c is written during render, so it is only as fresh as
+  // the last render. Two keys in one turn of the event loop (a paste, a key
+  // repeat, one stdin chunk holding both) have no render between them, and the
+  // second key still reads the old index. `done` is worse: it is plain state
+  // read from the closure, so the "answer once" latch is open until the
+  // handler is re-registered, which is after the render AND the effect.
+  // Both need a ref that the handler itself writes, not one mirrored in render.
+  it.fails("DEFECT: arrow-down and Enter in the same tick pick the old option", async () => {
+    const chosen = [];
+    const { stdin, unmount } = await renderMenu((level) => chosen.push(level));
+    try {
+      stdin.write("\x1B[B");
+      stdin.write("\r");
+      await tick();
+      expect(chosen).toEqual(["permissive"]);
+    } finally {
+      unmount();
+    }
+  });
+
+  it.fails("DEFECT: two answers in the same tick record two postures", async () => {
+    const chosen = [];
+    const { stdin, unmount } = await renderMenu((l) => chosen.push(l));
+    try {
+      stdin.write("s");
+      stdin.write("p");
+      await tick();
+      expect(chosen).toEqual(["safe"]);
+    } finally {
+      unmount();
+    }
+  });
+
+  it.fails("DEFECT: a second answer right behind the first, already rendered, is still recorded", async () => {
+    const chosen = [];
+    const { stdin, unmount } = await renderMenu((l) => chosen.push(l));
+    try {
+      stdin.write("s");
+      await afterRenderBeforeEffect();
+      stdin.write("p");
+      await tick();
+      expect(chosen).toEqual(["safe"]);
+    } finally {
+      unmount();
+    }
+  });
+
   it("Esc declines rather than choosing — a cancelled question is not an answer", async () => {
     const chosen = [];
     let cancelled = false;

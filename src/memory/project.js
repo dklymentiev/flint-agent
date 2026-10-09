@@ -12,6 +12,7 @@
 
 import { readFileSync, existsSync } from "node:fs";
 import { join, basename } from "node:path";
+import { config } from "../config.js";
 
 let _explicitProject = null;
 
@@ -32,10 +33,10 @@ export function clearCurrentProject() {
 /**
  * Detect the current project name.
  *
- * @param {string} [cwd=process.cwd()] — working directory
+ * @param {string} [cwd=config.baseDir] — the folder the agent works in (not Flint's install folder)
  * @returns {string|null} lowercase project name, or null if no project
  */
-export function getCurrentProject(cwd = process.cwd()) {
+export function getCurrentProject(cwd = config.baseDir || process.cwd()) {
   if (_explicitProject) return _explicitProject;
 
   // 2. MEMORY.md with `project:` frontmatter

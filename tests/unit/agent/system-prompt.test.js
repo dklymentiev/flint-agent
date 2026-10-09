@@ -1,5 +1,9 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { getSystemMessage } from "../../../src/agent/system-prompt.js";
+import { config } from "../../../src/config.js";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 
 describe("getSystemMessage()", () => {
   it("returns object with role system", () => {
@@ -17,6 +21,22 @@ describe("getSystemMessage()", () => {
     const msg = getSystemMessage();
     expect(msg.content).toContain("Intent Layer");
     expect(msg.content).toContain("intent");
+  });
+
+  it("names the folder the agent works in, and reads FLINT.md from it", () => {
+    // Flint runs from its own install folder; the agent works in config.baseDir.
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "flint-work-"));
+    const saved = config.baseDir;
+    try {
+      fs.writeFileSync(path.join(dir, "FLINT.md"), "Project note: the deploy host is zz-test-host.", "utf-8");
+      config.baseDir = dir;
+      const text = getSystemMessage().content;
+      expect(text).toContain("CWD: " + dir);
+      expect(text).toContain("zz-test-host");
+    } finally {
+      config.baseDir = saved;
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   it("contains environment info", () => {

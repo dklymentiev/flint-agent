@@ -213,8 +213,8 @@ One switch decides how early they start:
 Below those thresholds nothing is moved or shortened. `/spend` shows the
 modes; `/spend economy`, `/spend normal`, `/spend generous` (or `e`, `n`, `g`)
 switch and are remembered; `FLINT_SPEND` in the environment wins. Money
-limits are separate: `AGENT_MAX_COST` per message and `AGENT_SESSION_BUDGET`
-per session, both unlimited by default. See [docs/spend-modes.md](docs/spend-modes.md).
+limits are separate: `AGENT_MAX_COST` per message (default $5, 0 = off) and
+`AGENT_SESSION_BUDGET` per session (unlimited by default). See [docs/spend-modes.md](docs/spend-modes.md).
 
 ### Sessions
 
@@ -309,6 +309,12 @@ Runs one task and prints JSON on stdout:
 {"response": "Fixed the test...", "cost": 0.034, "tokens": 12500}
 ```
 
+A headless run never waits for a person. A command the guard would ask about
+(for example `rm -r`) is refused at once and the agent is told why; the
+first-run question is not shown; and with no API key configured the run stops
+with a message instead of opening the key wizard. Pass the key in the
+environment. The agent works in `--cwd` from its first step.
+
 ### Stdio (stream-json subprocess)
 
 A host that drives an agent CLI as a long-lived subprocess can drive Flint the
@@ -387,8 +393,8 @@ most people touch:
 |---|---|---|
 | `OPENROUTER_API_KEY` | none | key for OpenRouter (the setup can store it instead) |
 | `OPENROUTER_MODEL` | provider's default | model to start with |
-| `AGENT_MAX_ITERATIONS` | 150 | tool-call steps per message |
-| `AGENT_MAX_COST` | 0 (no limit) | cost limit per message, in dollars |
+| `AGENT_MAX_ITERATIONS` | 500 | tool-call steps per message |
+| `AGENT_MAX_COST` | 5 | cost limit per message, in dollars (0 = no limit) |
 | `AGENT_ALLOWED_PATHS` | none | folders the file tools may touch |
 | `MCP_SERVERS` | none | external tool servers |
 | `INTENT_MODEL` | none | optional model that picks the tools for each message; unset offers them all |

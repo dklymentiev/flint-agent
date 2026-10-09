@@ -1,8 +1,8 @@
 import { readFileSync, existsSync } from "node:fs";
-import { homedir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { config } from "../config.js";
+import { homeStateDir } from "../data-dir.js";
 
 import { processToolDefs, createProcessHandlers, activeChildren, killAllChildren } from "./process-tools.js";
 import { agentToolDefs, createAgentHandlers } from "./agent-tools.js";
@@ -64,7 +64,7 @@ export function createSystemTools(store) {
       const __dir = dirname(fileURLToPath(import.meta.url));
       const cfgPath = join(__dir, "../../config/models-curated.json");
       // homedir(), not process.env.HOME: HOME is unset on Windows.
-      const userPath = join(homedir(), ".flint", "models-curated.json");
+      const userPath = join(homeStateDir(), "models-curated.json");
       for (const p of [userPath, cfgPath]) {
         if (existsSync(p)) {
           const data = JSON.parse(readFileSync(p, "utf-8"));

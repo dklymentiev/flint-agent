@@ -15,6 +15,7 @@
 // only checked that the title changed would pass on the rejected design.
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { fitWidth } from "../../../src/ui/title-width.js";
 
 vi.mock("../../../src/logging/logger.js", () => ({
   createLogger: () => ({ debug: () => {}, info: () => {}, warn: () => {}, error: () => {} }),
@@ -208,7 +209,7 @@ describe("window title: Flint is visibly alive", () => {
       expect(
         written[written.length - 1],
         "stop() replaced a held title, losing the cost line it was told to keep",
-      ).toBe("Flint | $0.0123 | 4 tok");
+      ).toBe(fitWidth("Flint | $0.0123 | 4 tok"));
     });
 
     it("takes the last hold when two overlap", async () => {
@@ -223,10 +224,87 @@ describe("window title: Flint is visibly alive", () => {
         expect(
           written[written.length - 1],
           "the earlier hold won over a later one",
-        ).toBe("second");
+        ).toBe(fitWidth("second"));
       } finally {
         title.stop();
       }
     });
+  });
+});
+// Windows taskbar: the entry resizes with the title, so a title whose width
+// changes on every tick (or on every hold) makes the taskbar jump.
+describe("window title keeps one width", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  // Every char in these titles is a BMP, non-wide, non-combining code point, so
+  // the code point count is the display width in a monospace sense. The frames
+  // are checked separately: both must be one code point from one Unicode block,
+  // so a proportional font does not substitute a fallback font for one of them.
+  const width = (s) => [...s].length;
+
+  it("has the same length on every tick, with a task and without", async () => {
+    const { startAliveTitle } = await load();
+    const { written, setTitle } = sink();
+    const title = startAliveTitle({ setTitle, isTTY: true });
+    try {
+      title.setTask?.("fix the flaky login test in the billing service please");
+      vi.advanceTimersByTime(500 * 6);
+      title.setTask?.("ls");
+      vi.advanceTimersByTime(500 * 4);
+      const widths = new Set(written.map(width));
+      expect(written.length).toBeGreaterThan(8);
+      expect([...widths], `title widths differ: ${[...widths]}`).toHaveLength(1);
+      expect(written[written.length - 1]).toMatch(/Flint agent - /);
+    } finally {
+      title.stop();
+    }
+  });
+
+  it("keeps the owner's two frames, the gear and the spark", async () => {
+    const { TITLE_FRAMES } = await load();
+    expect(TITLE_FRAMES).toEqual(["⛭", "✲"]);
+  });
+
+  it("gives held titles (approval, cost line) the same width as the spinner", async () => {
+    const { startAliveTitle } = await load();
+    const { ATTENTION_TITLE } = await import("../../../src/ui/prompt-attention.js");
+    const { written, setTitle } = sink();
+    const title = startAliveTitle({ setTitle, isTTY: true });
+    try {
+      const spinnerWidth = width(written[0]);
+      title.hold("Flint | 0.0123 | 4 tok");
+      title.hold("Flint | ~12.3456 | 1234567 tok and a long tail that must be cut off");
+      title.hold(ATTENTION_TITLE);
+      expect(written.slice(1).map(width)).toEqual([spinnerWidth, spinnerWidth, spinnerWidth]);
+      expect(width(ATTENTION_TITLE)).toBeLessThanOrEqual(spinnerWidth);
+      expect(written[written.length - 1]).toMatch(/waiting for approval/);
+      title.release();
+      title.stop();
+      expect(width(written[written.length - 1])).toBe(spinnerWidth);
+    } finally {
+      title.stop();
+    }
+  });
+
+  // The test above pushes ATTENTION_TITLE through hold(), which pads it. The
+  // approval prompt does not go through hold(): promptAttentionStart() writes
+  // the title itself, and that write is the one the taskbar shows while Flint
+  // waits. Its width was not checked anywhere.
+  it("the approval prompt writes its own title at that same width", async () => {
+    const { startAliveTitle } = await load();
+    const { promptAttentionStart, ATTENTION_TITLE } = await import("../../../src/ui/prompt-attention.js");
+    const spinner = sink();
+    const title = startAliveTitle({ setTitle: spinner.setTitle, isTTY: true });
+    title.stop();
+    const attention = sink();
+    promptAttentionStart({ isTTY: false, previousTitle: "x", setTitle: attention.setTitle, write: () => {} });
+    expect(attention.written).toHaveLength(1);
+    expect(attention.written[0].trimEnd()).toBe(ATTENTION_TITLE);
+    expect(width(attention.written[0])).toBe(width(spinner.written[0]));
   });
 });

@@ -7,6 +7,7 @@ import { TOOL_SEARCH_NAME, toolSearchDef, createToolSearchHandler, resetLoadedTo
 import { swapToolDefs, createSwapHandlers } from "./swap-tools.js";
 import { swapEnabled, getCurrentSwapStore } from "../agent/swap.js";
 import { tools as pluginTools, handlers as pluginHandlers } from "./plugin-tools.js";
+import { mcpServerOf } from "./mcp-tool-servers.js";
 
 const log = createLogger("registry");
 
@@ -197,6 +198,38 @@ export function getDefinitions() {
 
 // ── Schema Validation ────────────────────────────────────────
 
+// Some models send an MCP tool's number, array or object as a string ("100",
+// "[\"a\",\"b\"]"). The MCP server's own schema is right to want the real type,
+// so the string is converted here, before validateArgs, and only when the
+// string parses to exactly the type the schema asks for. Anything else is left
+// alone and reported by the validator as before. Built-in tools are untouched.
+export function normalizeMcpArgs(name, args) {
+  if (!mcpServerOf(name) || !args || typeof args !== "object" || Array.isArray(args)) return args;
+  const schema = allTools.find((t) => t.function?.name === name)?.function?.parameters;
+  if (!schema?.properties) return args;
+  let normalized = args;
+  for (const [key, value] of Object.entries(args)) {
+    const type = schema.properties[key]?.type;
+    if (typeof value !== "string") continue;
+    let converted;
+    if (type === "integer") {
+      if (/^-?(?:0|[1-9]\d*)$/.test(value) && Number.isSafeInteger(Number(value))) converted = Number(value);
+    } else if (type === "number") {
+      if (/^-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?$/.test(value) && Number.isFinite(Number(value))) converted = Number(value);
+    } else if (type === "array" || type === "object") {
+      try {
+        const parsed = JSON.parse(value);
+        const ok = type === "array" ? Array.isArray(parsed) : parsed !== null && typeof parsed === "object" && !Array.isArray(parsed);
+        if (ok) converted = parsed;
+      } catch {}
+    }
+    if (converted === undefined) continue;
+    if (normalized === args) normalized = { ...args };
+    normalized[key] = converted;
+  }
+  return normalized;
+}
+
 function validateArgs(name, args) {
   const def = allTools.find((t) => t.function?.name === name);
   if (!def?.function?.parameters) return null; // no schema = skip
@@ -294,6 +327,7 @@ export async function executeTool(name, args) {
   }
 
   // Validate args against tool schema
+  args = normalizeMcpArgs(name, args);
   const validationErrors = validateArgs(name, args);
   if (validationErrors) {
     return `Error: invalid parameters for "${name}": ${validationErrors.join("; ")}`;

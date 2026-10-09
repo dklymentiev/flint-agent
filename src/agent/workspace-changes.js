@@ -12,7 +12,8 @@
 // snapshots differ exactly where something was written, whoever wrote it.
 
 import { readdirSync, statSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { dirname, join, resolve, sep } from "node:path";
+import { config } from "../config.js";
 
 // Past this many files a snapshot gives up and says so (null), and the caller
 // makes no claim about the disk. Walking a big tree on every tool call would
@@ -106,6 +107,13 @@ export function pathRootsIn(value) {
     for (const m of [...(s.match(POSIX_PATH) || []), ...(s.match(WINDOWS_PATH) || [])]) {
       let p = resolve(m.replace(/[\\/.,:]+$/, "") || m);
       if (PSEUDO_FS.test(p.replace(/\\/g, "/"))) continue;
+      // On Windows, Git Bash /drive/ paths (e.g. /c/Projects/...) resolve via
+      // path.resolve to a literal "C:\c\..." subdirectory, not drive C:\. If
+      // such a path appears in the model's text, watching it would make the
+      // change tracker report changes in the wrong repository. Reject it here
+      // — only drive-letter paths (C:\...) or POSIX paths on non-Windows are
+      // real. Deleting this check lets split-brain paths leak into the report.
+      if (process.platform === "win32" && /^\/[a-zA-Z]\//.test(m.replace(/[\\/.,:]+$/, "") || m)) continue;
       for (;;) {
         let st = null;
         try { st = statSync(p); } catch {}
@@ -161,7 +169,7 @@ export function createChangeTracker({ roots, skip = [], maxFiles = MAX_FILES }) 
     changes() {
       if (unknown) return null;
       const now = snapshotWorkspace([...watched], { skip, maxFiles });
-      const files = changedFiles(baseline, now);
+      let files = changedFiles(baseline, now);
       if (!files) return null;
       let newestMs = 0;
       for (const f of files) {

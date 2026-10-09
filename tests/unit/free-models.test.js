@@ -2,6 +2,7 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { existsSync, rmSync } from "node:fs";
 import path from "node:path";
+import os from "node:os";
 
 vi.mock("../../src/logging/logger.js", () => ({
   createLogger: () => ({ debug() {}, info() {}, warn() {}, error() {} }),
@@ -31,7 +32,7 @@ const ep = (provider, { uptime = 99, tps = 50, first = 1000, status = 0 } = {}) 
   throughput_last_30m: tps == null ? null : { p50: tps }, latency_last_30m: first == null ? null : { p50: first },
 });
 
-const saved = (name) => path.join(process.env.FLINT_DATA_DIR, name);
+const saved = (name) => path.join(os.homedir(), ".flint", name);
 afterEach(() => { for (const f of ["free.json"]) if (existsSync(saved(f))) rmSync(saved(f)); config.freeChain = null; });
 
 describe("F1 candidates", () => {

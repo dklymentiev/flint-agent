@@ -37,8 +37,12 @@ const TEST_ENV = {
   CI: "false",
   INTENT_MODEL: "test/intent-model",
   OPENROUTER_API_KEY: "test-key",
+  // FLINT_DATA_DIR is deliberately NOT set here.  home-guard.js (a setupFile)
+  // isolates per-worker via HOME/USERPROFILE instead, so that homeStateDir()
+  // falls through to os.homedir() and tests that mock homedir() are honored.
+  // See home-guard.js for the full rationale.
   FLINT_OWN_ENV: "0",
-  FLINT_DATA_DIR: fs.mkdtempSync(path.join(os.tmpdir(), "flint-test-data-")),
+  FLINT_TEST_MODE: "unit",
   FLINT_TEST_PERMISSIONS_FILE: SANDBOX_PERMS,
   HOME: SANDBOX_HOME,
   USERPROFILE: SANDBOX_HOME,

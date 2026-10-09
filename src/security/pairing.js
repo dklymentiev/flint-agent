@@ -2,8 +2,8 @@
 
 import crypto from "node:crypto";
 import { existsSync, readFileSync, writeFileSync, mkdirSync, renameSync } from "node:fs";
-import { homedir } from "node:os";
 import { join } from "node:path";
+import { homeStateDir } from "../data-dir.js";
 
 const MAX_ATTEMPTS = 3;
 const MAX_SESSIONS = 5;
@@ -59,7 +59,7 @@ const sessions = new Map();
 // not once per run. Each pairing has a lifetime, see pairingTtlMs(). Only a SHA-256 of each token is written, so the file
 // grants nothing to whoever reads it. The path is resolved per call, so a
 // test's sandboxed home is honoured.
-const flintDir = () => join(homedir(), ".flint");
+const flintDir = () => join(homeStateDir());
 const pairedFile = () => join(flintDir(), "paired-clients.json");
 
 /** @type {Array<{ hash: string, name: string, address: string, pairedAt: string }>|null} */
