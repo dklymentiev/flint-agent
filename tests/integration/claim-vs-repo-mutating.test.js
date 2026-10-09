@@ -16,16 +16,28 @@ const workdir = vi.hoisted(() => ({
   path: "/tmp/flint-workdir-git-status-test",
 }));
 
-vi.mock("../../src/config.js", () => ({
-  config: {
-    apiKey: "test-key",
-    model: "test-model",
-    apiUrl: "https://test.api/v1/chat/completions",
-    projectRoot: process.cwd(),
-    workdir: workdir.path,
-    maxIterations: 50,
-  },
-}));
+// permissionsFile is a temp file of this test's own. Without it the permission
+// layer falls back to <projectRoot>/.permissions.json, and one test below sets
+// run_command to "deny": under the default config (the CI command, cwd = the
+// checkout) that wrote the rule into the checkout and every later test that
+// runs a command was refused.
+vi.mock("../../src/config.js", async () => {
+  const os = await import("node:os");
+  const path = await import("node:path");
+  const fs = await import("node:fs");
+  const permsDir = fs.mkdtempSync(path.join(os.tmpdir(), "flint-cvr-perms-"));
+  return {
+    config: {
+      apiKey: "test-key",
+      model: "test-model",
+      apiUrl: "https://test.api/v1/chat/completions",
+      projectRoot: process.cwd(),
+      workdir: workdir.path,
+      maxIterations: 50,
+      permissionsFile: path.join(permsDir, ".permissions.json"),
+    },
+  };
+});
 
 let INTENT = { intent: "complex_multi", tools: [], max_steps: 30, changes: "maybe", fallback: false };
 vi.mock("../../src/agent/intent.js", () => ({

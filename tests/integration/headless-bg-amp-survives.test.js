@@ -138,7 +138,11 @@ async function runHeadlessWithAmp(providerPort, scratch) {
 
   // The command the model will run: launch the sleeper in the background
   // with `&`, then echo a marker so run_command returns.
-  const ampCommand = `node "${script}" "${pidFile}" > /dev/null 2>&1 & echo marker`;
+  // The command waits until the child has written its PID before it returns.
+  // A headless run kills `&` children when the command ends, and on a busy
+  // machine that came before the child had started: no PID file, and the
+  // test could not tell which process to look for.
+  const ampCommand = `node "${script}" "${pidFile}" > /dev/null 2>&1 & n=0; while [ ! -f "${pidFile}" ] && [ $n -lt 100 ]; do sleep 0.1; n=$((n+1)); done; echo marker`;
 
   const stdoutFile = path.join(tmpBase, "stdout.txt");
   const stderrFile = path.join(tmpBase, "stderr.txt");
@@ -247,7 +251,7 @@ describe("--headless: & background processes do not survive exit", () => {
       const pidFile = path.join(scratch, "pid.txt").split(path.sep).join("/");
       fs.writeFileSync(script,
         'require("fs").writeFileSync(process.argv[2], String(process.pid)); setInterval(() => {}, 1000);');
-      const ampCommand = `node "${script}" "${pidFile}" > /dev/null 2>&1 & echo marker`;
+      const ampCommand = `node "${script}" "${pidFile}" > /dev/null 2>&1 & n=0; while [ ! -f "${pidFile}" ] && [ $n -lt 100 ]; do sleep 0.1; n=$((n+1)); done; echo marker`;
 
       let started = false;
       const provider = await startFakeProvider((body, isStreaming, callIdx) => {

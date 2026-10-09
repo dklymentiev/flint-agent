@@ -230,7 +230,10 @@ describe("run_command", () => {
     while (isAlive(pid) && Date.now() < deadline) {
       await new Promise(r => setTimeout(r, 50));
     }
-    fs.rmSync(tmpBase, { recursive: true, force: true });
+    // Windows keeps the folder busy a little longer than the process lives
+    // (EBUSY on rmdir, red on every Windows run). The assertions above are the
+    // test; a temp folder that could not be removed yet is not a failure.
+    try { fs.rmSync(tmpBase, { recursive: true, force: true, maxRetries: 20, retryDelay: 150 }); } catch {}
   }, 15000);
 
   // And the flip side: a normal command returns a clean zero exit code in

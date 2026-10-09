@@ -39,6 +39,14 @@ if (process.env.VITEST === "true" && process.env.VITEST_POOL_ID) {
   mkdirSync(workerHome, { recursive: true });
   process.env.HOME = workerHome;
   process.env.USERPROFILE = workerHome;
+  // The same goes for the sandbox permissions file. The config names one file
+  // for the whole run, so two test files in two workers wrote it at once:
+  // an approval one file had just saved was gone when it read the file back
+  // (permission-preserve and permission-checks, red in a full run, green
+  // alone). One file per worker, as with the home.
+  if (process.env.FLINT_TEST_PERMISSIONS_FILE) {
+    process.env.FLINT_TEST_PERMISSIONS_FILE = path.join(workerHome, ".permissions.json");
+  }
 }
 
 // FLINT_DATA_DIR must be unset for UNIT TESTS so homeStateDir() falls through

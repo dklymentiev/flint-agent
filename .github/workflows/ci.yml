@@ -26,7 +26,12 @@ jobs:
           node-version: ${{ matrix.node }}
           cache: npm
       - run: npm ci
-      - run: npx vitest run
+      # The two suites with their own configs, the way `npm run test:all` runs
+      # them. Integration tests need what only their config gives them: an
+      # empty working folder per file and a longer timeout. Under the default
+      # config they share the checkout as cwd and trip over each other's files.
+      - run: npx vitest run --config vitest.config.unit.js
+      - run: npx vitest run --config vitest.config.integration.js
 
   audit:
     runs-on: ubuntu-latest
