@@ -43,7 +43,9 @@ PROVIDER_PID=""
 # The umask too: what root installs must come out readable and not writable by
 # others whatever the caller's shell had.
 umask 022
-ROOTPREFIX="$(mktemp -d /opt/flint-smoke.XXXXXX)"
+# Under /var/lib, not /opt: on GitHub's runners /opt carries a default ACL that
+# makes everything created below it writable by everyone, umask or not.
+ROOTPREFIX="$(mktemp -d /var/lib/flint-smoke.XXXXXX)"
 chmod 755 "$ROOTPREFIX"
 export npm_config_prefix="$ROOTPREFIX"
 export PATH="$ROOTPREFIX/bin:$PATH"
