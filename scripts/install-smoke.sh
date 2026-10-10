@@ -36,7 +36,15 @@ VER="$(node -p "require('$TREE/package.json').version")"
 WORK="$(mktemp -d)"
 chmod 755 "$WORK"
 PROVIDER_PID=""
-cleanup() { [ -z "$PROVIDER_PID" ] || kill "$PROVIDER_PID" 2>/dev/null || true; rm -rf "$WORK"; }
+# A prefix that is root's own for every global install root makes here. The
+# machine's default prefix is not always root's: on a CI runner the Node
+# toolcache can be written by anyone, the test user could then write the
+# install, and that is the one thing this test has to rule out.
+ROOTPREFIX="$(mktemp -d /opt/flint-smoke.XXXXXX)"
+chmod 755 "$ROOTPREFIX"
+export npm_config_prefix="$ROOTPREFIX"
+export PATH="$ROOTPREFIX/bin:$PATH"
+cleanup() { [ -z "$PROVIDER_PID" ] || kill "$PROVIDER_PID" 2>/dev/null || true; rm -rf "$WORK" "$ROOTPREFIX"; }
 trap cleanup EXIT
 
 # Run a command as an unprivileged user with nothing in the environment but
