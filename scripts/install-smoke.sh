@@ -61,7 +61,10 @@ as_user() {
   local home own=""
   home="$(getent passwd "$user" | cut -d: -f6)"
   [ ! -d "$home/.npm-global/bin" ] || own="$home/.npm-global/bin:"
-  runuser -u "$user" -- env -i HOME="$home" PATH="$own$PATH" "$@"
+  # From the user's own home, as a login would start them. Left in the
+  # caller's directory, which on a CI runner is someone else's checkout the
+  # user cannot enter, every child process failed to start with EACCES.
+  (cd "$home" && runuser -u "$user" -- env -i HOME="$home" PATH="$own$PATH" "$@")
 }
 
 new_user() {
