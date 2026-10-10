@@ -6,7 +6,7 @@
 // updated by hand.
 
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
 const DAY = 24 * 3600 * 1000;
@@ -94,6 +94,60 @@ export function updateNotice(check) {
   return `Flint ${check.latest} is out (you have ${check.current}). /update installs it.`;
 }
 
+/**
+ * Whether this start looks for a newer version at all. Only the console does:
+ * nobody reads the notice in a headless, stdio, check or list run, and a run
+ * that belongs to a program must not reach out to a registry on its own.
+ * Nothing about updates ever asks a question, in any mode.
+ *
+ * @param {string|undefined} action - cli.action
+ * @param {Record<string, string|undefined>} [env]
+ */
+export function wantsUpdateCheck(action, env = process.env) {
+  if (env.FLINT_UPDATE_CHECK === "0") return false;
+  return action !== "headless" && action !== "stdio" && action !== "check" && action !== "list";
+}
+
+/** True when a file can be created in `dir`. Proved by writing, as in data-dir.js. */
+export function canWriteDir(dir) {
+  const probe = path.join(dir, `.write-probe-${process.pid}`);
+  try {
+    writeFileSync(probe, "");
+    unlinkSync(probe);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * `flint --update`: the update without the console, for a script or a server
+ * operator. Prints what it does, never asks, and returns the exit code:
+ * 0 updated or already the newest, 1 anything else.
+ */
+export async function runUpdateCli({ root, current, kind = installKind(root), out = console.log, exec, fetchJson, canWrite, platform }) {
+  if (kind === "git") {
+    const r = await runUpdate({ root, kind, current, log: out, restart: () => {}, ...(exec ? { exec } : {}) });
+    return r.ok ? 0 : 1;
+  }
+  // Asked now, not from the once-a-day cache: the person just asked.
+  const check = await checkForUpdate({ root, current, kind, ...(exec ? { exec } : {}), ...(fetchJson ? { fetchJson } : {}) });
+  if (!check) {
+    out("Could not find out the newest version (is the npm registry reachable?). Nothing changed.");
+    return 1;
+  }
+  if (!check.newer) {
+    out(`Flint ${current} is the latest version.`);
+    return 0;
+  }
+  out(`Flint ${check.latest} is out (you have ${current}).`);
+  const r = await runUpdate({
+    root, kind, current, latest: check.latest, log: out, restart: () => {},
+    ...(exec ? { exec } : {}), ...(canWrite ? { canWrite } : {}), ...(platform ? { platform } : {}),
+  });
+  return r.ok ? 0 : 1;
+}
+
 /** The CHANGELOG sections newer than `from`, up to and including `to`. */
 export function changelogBetween(text, from, to) {
   const out = [];
@@ -110,8 +164,24 @@ export function changelogBetween(text, from, to) {
  * Update this copy and restart. Refuses, changing nothing, when that would
  * overwrite someone's work. Returns { ok, updated?, latest?, reason? }.
  */
-export async function runUpdate({ root, kind, current, latest, exec = defaultExec(root), log, restart, readChangelog }) {
+// Ten minutes for the commands of an update: a global npm install compiles the
+// SQLite binding from source where no prebuilt one exists, which can take
+// longer than the two minutes every other command gets.
+export async function runUpdate({ root, kind, current, latest, exec = defaultExec(root, 600000), log, restart, readChangelog, canWrite = canWriteDir, platform = process.platform }) {
   if (kind === "npm") {
+    // A global install made by root (sudo npm install -g, a server). npm would
+    // find that out for us and the first line of its EACCES was all the
+    // person got. Asked first: nothing is attempted, and the command that
+    // works is named. Flint never calls sudo itself, it would wait for a
+    // password.
+    if (!canWrite(root)) {
+      const cmd = "npm install -g flint-agent@latest";
+      log("This install belongs to another user, so Flint cannot replace it from here. Nothing changed.");
+      log(platform === "win32"
+        ? `Update it from an administrator terminal: ${cmd}`
+        : `Update it with: sudo ${cmd}`);
+      return { ok: false, reason: "install not writable" };
+    }
     log(`Installing the latest flint-agent from npm (you have ${current})...`);
     try {
       exec("npm", ["install", "-g", "flint-agent@latest"]);
@@ -124,8 +194,9 @@ export async function runUpdate({ root, kind, current, latest, exec = defaultExe
     return { ok: true, updated: true, latest };
   }
   if (kind !== "git") {
-    log("This copy was not installed with git or npm, so it cannot update itself.");
-    log("Update by hand: `git clone https://github.com/dklymentiev/flint-agent.git` (then `npm install`), or `npm i -g flint-agent`.");
+    // No advice to clone or to install from npm: that would put a second
+    // Flint beside this one and leave this one as it is.
+    log(`This copy was not installed with git or npm, so Flint cannot update it: it is updated the way it was put here${latest ? ` (the newest version is ${latest})` : ""}.`);
     return { ok: false, reason: "unknown install" };
   }
 

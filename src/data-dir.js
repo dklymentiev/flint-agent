@@ -67,19 +67,37 @@ export function installIsWritable() {
   return _installWritable;
 }
 
+/** True when this copy runs from inside a node_modules folder: an npm install. */
+export function isPackageInstall(root = PROJECT_ROOT) {
+  return root.split(/[\\/]/).includes("node_modules");
+}
+
+/**
+ * Whether state may live next to the code.  Only in a checkout this user can
+ * write.  Never inside an npm package: `npm install -g flint-agent@latest`
+ * replaces the package folder, and everything Flint had written into it went
+ * with it.  Measured on 1.14.6 -> 1.14.7 in a per-user npm prefix: 8 session
+ * files before the update, 0 after, the saved permissions and the file memory
+ * gone too.  So an update, the thing `/update` runs, deleted the user's work.
+ */
+export function stateBesideInstall() {
+  return !isPackageInstall() && installIsWritable();
+}
+
 /**
  * The install-relative state directory.  Modules that master kept next to the
  * install (sessions/, .permissions.json, knowledge/) use this.  In order:
  *
  *   1. FLINT_DATA_DIR (--data-dir) when set.
- *   2. PROJECT_ROOT when this user can write it: a checkout, a per-user npm
- *      prefix.  Unchanged from before.
- *   3. ~/.flint when they cannot: a system install owned by root
- *      (/opt/..., /usr/lib/node_modules).  There a plain `flint` died on
+ *   2. PROJECT_ROOT for a checkout this user can write (a git clone).
+ *      Unchanged from before.
+ *   3. ~/.flint otherwise: an npm install, whoever owns it (see
+ *      stateBesideInstall), and any other copy this user cannot write
+ *      (/opt/...).  On a root-owned one a plain `flint` died on
  *      "EACCES: mkdir <install>/sessions" and the only way to start at all
  *      was to know about FLINT_DATA_DIR.
  *
- * Step 3 is a rule about where a read-only install keeps its state, decided
+ * Step 3 is a rule about where such an install keeps its state, decided
  * before anything is written, not a second try after a write failed.  If
  * ~/.flint cannot be written either, stateDirRefusal() stops the start.
  *
@@ -103,7 +121,7 @@ export function installStateDir() {
  * @returns {string} absolute path
  */
 export function defaultInstallStateDir() {
-  return installIsWritable() ? PROJECT_ROOT : join(homedir(), ".flint");
+  return stateBesideInstall() ? PROJECT_ROOT : join(homedir(), ".flint");
 }
 
 /**

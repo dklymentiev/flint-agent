@@ -29,7 +29,11 @@ not wait), at most once a day:
   the next start the same day does not check again.
 - Newer than `package.json`'s version: one line in the history,
   `Flint 1.11.1 is out (you have 1.11.0). /update installs it.`
-- Not in the stdio or headless modes. `FLINT_UPDATE_CHECK=0` turns it off.
+- In the console only. Not in a headless, stdio, check or list run: nobody
+  reads the notice there, and a run that belongs to a program does not reach
+  out to a registry on its own (`wantsUpdateCheck`). `FLINT_UPDATE_CHECK=0`
+  turns it off in the console too.
+- Nothing about updates asks a question, in any mode.
 
 ## /update
 
@@ -46,8 +50,22 @@ not wait), at most once a day:
   4. If `npm install` fails: `git reset --hard <the commit it was on>`, and
      `npm install` again, so the old version still runs; says what failed.
 - `npm`: `npm install -g flint-agent@latest`; failure leaves the old one.
-- `none`: says how to update by hand.
+  When the install cannot be written by this user (installed by root, as on a
+  server), nothing is attempted: Flint says the install belongs to another
+  user and prints the command to run, `sudo npm install -g flint-agent@latest`
+  (on Windows: the same command in an administrator terminal). Flint never
+  calls sudo itself, it would wait for a password.
+- `none`: says it cannot update this copy and that it is updated the way it
+  was put there. No advice to clone or install from npm: that would be a
+  second Flint beside this one.
 - After a successful update: restarts, continuing the session (src/restart.js).
+
+## flint --update
+
+The same update without the console, for a script or a server operator:
+`flint --update` prints what it does and exits, 0 when it updated or was
+already the newest, 1 otherwise. It asks the registry now rather than reading
+the once-a-day cache, and it never asks the person anything.
 
 ## Acceptance
 
@@ -60,3 +78,6 @@ not wait), at most once a day:
 | U5 | A git update runs fetch, fast-forward, `npm install` only when the package files changed, and restarts; a failed install goes back to the old commit. | `update.test.js` |
 | U6 | The CHANGELOG sections between the two versions are shown. | `update.test.js` |
 | U7 | Live: a checkout one release behind sees the notice and `/update` brings it to the latest, continuing the session. | manual, recorded in the commit |
+| U8 | On an npm install this user cannot write, the update attempts nothing and names the command to run. | `update.test.js`, `scripts/install-smoke.sh` |
+| U9 | No update check in a headless, stdio, check or list run; a headless turn on an out-of-date install runs and says nothing about updates. | `update.test.js`, `scripts/install-smoke.sh` |
+| U10 | `flint --update` on a per-user npm install brings it to the latest release; the old session is still listed and a new turn runs. | `update.test.js`, `scripts/install-smoke.sh` |

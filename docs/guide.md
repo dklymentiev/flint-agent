@@ -526,7 +526,7 @@ Set in the environment or in `.env` in Flint's folder. Selected variables:
 | `INTENT_MODEL` | none | Classifier model that picks the tools per turn. Unset: the classifier is off |
 | `FLINT_SPEND` | none | Spend level, overrides `/spend` |
 | `FLINT_SWAP` | on | `0` turns context swap off |
-| `FLINT_DATA_DIR` | none | Where sessions, tasks and memory go. Unset: memory and tasks in `~/.flint`, sessions next to the install, or in `~/.flint` too when the install cannot be written (a system install owned by root) |
+| `FLINT_DATA_DIR` | none | Where sessions, tasks and memory go. Unset: everything in `~/.flint`, except in a git checkout you can write, which keeps its sessions next to itself. An npm install never keeps anything inside its own folder, because npm replaces that folder on every update |
 | `FLINT_UPDATE_CHECK` | on | `0` turns the update notice off |
 | `FLINT_PLUGIN_INSTALL` | `ask` | `allow` lets the agent install plugins without asking |
 | `FLINT_SELF_VERIFY` | `off` | `on` adds a round that asks the model to check a change it made |

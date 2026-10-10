@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import {
   compareVersions, latestTag, installKind, checkForUpdate, updateNotice, changelogBetween, runUpdate,
+  wantsUpdateCheck, runUpdateCli,
 } from "../../src/update.js";
 
 let dir;
@@ -188,11 +189,103 @@ describe("/update (U4, U5)", () => {
     expect(restarted).toBe(true);
   });
 
-  it("a copied folder: says how to update by hand", async () => {
+  // Whoever put the copy there updates it. A clone or a global npm install
+  // would be a second Flint beside it, not an update of this one.
+  it("a copied folder: says it cannot update this copy, and does not advise a second install", async () => {
     const lines = [];
     const r = await runUpdate({ root: dir, kind: "none", current: "1.11.0", exec: () => "", log: (l) => lines.push(l), restart: () => {}, readChangelog: () => "" });
     expect(r.ok).toBe(false);
-    expect(lines.join("\n")).toMatch(/git clone|npm i/);
+    expect(lines.join("\n")).toMatch(/not installed with git or npm/);
+    expect(lines.join("\n")).not.toMatch(/git clone|npm i\b/);
     expect(existsSync(path.join(dir, ".git"))).toBe(false);
+  });
+});
+
+// An install owned by root (npm install -g with sudo, a system package). The
+// person running Flint cannot replace it; npm found that out for us, and the
+// first line of its error was all they were told.
+describe("/update on an install this user cannot write (U8)", () => {
+  const run = async (platform) => {
+    const { exec, calls } = fakeExec({});
+    const lines = [];
+    let restarted = false;
+    const r = await runUpdate({
+      root: dir, kind: "npm", current: "1.11.0", latest: "1.12.0", exec, platform,
+      canWrite: () => false, log: (l) => lines.push(l), restart: () => { restarted = true; }, readChangelog: () => "",
+    });
+    return { r, calls, text: lines.join("\n"), restarted };
+  };
+
+  it("does not try: names the command to run with sudo, and nothing changes", async () => {
+    const { r, calls, text, restarted } = await run("linux");
+    expect(r).toMatchObject({ ok: false, reason: "install not writable" });
+    expect(calls).toEqual([]);
+    expect(text).toContain("sudo npm install -g flint-agent@latest");
+    expect(restarted).toBe(false);
+  });
+
+  it("on Windows there is no sudo: an administrator terminal", async () => {
+    const { r, calls, text } = await run("win32");
+    expect(r.ok).toBe(false);
+    expect(calls).toEqual([]);
+    expect(text).not.toContain("sudo");
+    expect(text).toMatch(/administrator/i);
+    expect(text).toContain("npm install -g flint-agent@latest");
+  });
+});
+
+// Nobody reads a notice in these modes, and a run that belongs to a program
+// must not reach out to a registry on its own or wait on anything.
+describe("no update check where nobody is watching (U9)", () => {
+  it.each(["headless", "stdio", "check", "list"])("%s: no check", (action) => {
+    expect(wantsUpdateCheck(action, {})).toBe(false);
+  });
+  it("the console checks", () => {
+    expect(wantsUpdateCheck("new", {})).toBe(true);
+    expect(wantsUpdateCheck(undefined, {})).toBe(true);
+  });
+  it("FLINT_UPDATE_CHECK=0 turns it off in the console too", () => {
+    expect(wantsUpdateCheck("new", { FLINT_UPDATE_CHECK: "0" })).toBe(false);
+  });
+});
+
+// `flint --update`: the update without the console, for a script or a server
+// operator. It never asks anything; the exit code is the answer.
+describe("flint --update (U10)", () => {
+  const cli = async (over = {}) => {
+    const { exec, calls } = fakeExec({});
+    const lines = [];
+    const code = await runUpdateCli({
+      root: dir, current: "1.11.0", kind: "npm", exec, canWrite: () => true, platform: "linux",
+      fetchJson: async () => ({ version: "1.12.0" }), out: (l) => lines.push(l), ...over,
+    });
+    return { code, calls, text: lines.join("\n") };
+  };
+
+  it("a newer version: installs it and exits 0", async () => {
+    const { code, calls, text } = await cli();
+    expect(code).toBe(0);
+    expect(calls).toContain("npm install -g flint-agent@latest");
+    expect(text).toContain("1.12.0");
+  });
+
+  it("already the newest: says so, installs nothing, exits 0", async () => {
+    const { code, calls, text } = await cli({ fetchJson: async () => ({ version: "1.11.0" }) });
+    expect(code).toBe(0);
+    expect(calls).toEqual([]);
+    expect(text).toContain("1.11.0 is the latest");
+  });
+
+  it("the newest version cannot be found out: says so and exits 1", async () => {
+    const { code, calls } = await cli({ fetchJson: async () => null });
+    expect(code).toBe(1);
+    expect(calls).toEqual([]);
+  });
+
+  it("an install it cannot write: the command to run, exit 1", async () => {
+    const { code, calls, text } = await cli({ canWrite: () => false });
+    expect(code).toBe(1);
+    expect(calls).toEqual([]);
+    expect(text).toContain("sudo npm install -g flint-agent@latest");
   });
 });

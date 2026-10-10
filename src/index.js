@@ -1104,10 +1104,11 @@ if (serverResult && typeof serverResult.then === "function") {
 }
 
   // -- Is there a newer Flint? (docs/self-update.md) --
-  // In the background, at most once a day, never in the headless mode; one
-  // line when there is. FLINT_UPDATE_CHECK=0 turns it off.
+  // In the background, at most once a day, in the console only; one line
+  // when there is. Never in a headless, stdio, check or list run, and it
+  // never asks anything. FLINT_UPDATE_CHECK=0 turns it off.
 }
-  if (cli.action !== "headless" && process.env.FLINT_UPDATE_CHECK !== "0") {
+  if ((await import("./update.js")).wantsUpdateCheck(cli.action)) {
     setTimeout(async () => {
     try {
       const { checkForUpdate, installKind, updateNotice } = await import("./update.js");

@@ -16,6 +16,16 @@ if (userArgs.includes("--version") || userArgs.includes("-v")) {
   process.exit(0);
 }
 
+// `flint --update`: install the newest version and exit, no console and no
+// question (src/update.js). Here, before any child is started, so a script or
+// a server operator can run it where there is no terminal.
+if (userArgs.includes("--update")) {
+  const { readFileSync } = await import("node:fs");
+  const { runUpdateCli } = await import("./update.js");
+  const current = JSON.parse(readFileSync(path.join(projectRoot, "package.json"), "utf8")).version;
+  process.exit(await runUpdateCli({ root: projectRoot, current }));
+}
+
 const hasSessionArg = userArgs.some(a => a === "--last" || a === "--session" || a === "--list" || a === "--new");
 
 const RESTART_CODE = 42;

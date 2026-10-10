@@ -1,6 +1,6 @@
 # Flint Agent -- Technical Reference
 
-**Version:** 1.14.7
+**Version:** 1.14.8
 **Checked against the code:** 2026-10-03
 **Source:** The main exported functions, tools, endpoints, commands and config options in `src/`
 
@@ -100,7 +100,7 @@ Central configuration object. Reads from CLI args, env vars, persisted provider 
 | `selfVerify` | string | `"off"` | `FLINT_SELF_VERIFY=on` | After "done" on a turn that changed files and ran nothing, one more round asks the model to show the change works |
 | `autoMaxIterations` | number | `50` | `AGENT_AUTO_MAX_ITERATIONS` | Max iterations in autonomous mode |
 | `autoMaxCost` | number | `0.50` | `AGENT_AUTO_MAX_COST` | Max cost in autonomous mode |
-| `sessionsDir` | string | `<root>/sessions` | `FLINT_DATA_DIR` | Directory for session files: `<FLINT_DATA_DIR>/sessions` when set, `~/.flint/sessions` when it is not set and the install cannot be written by this user, `<root>/sessions/children` in a child agent |
+| `sessionsDir` | string | `<root>/sessions` | `FLINT_DATA_DIR` | Directory for session files: `<FLINT_DATA_DIR>/sessions` when set, `<root>/sessions` only in a git checkout this user can write, `~/.flint/sessions` otherwise (an npm install, a copy owned by another user), and `sessions/children` under the same place in a child agent |
 | `projectRoot` | string | resolved | -- | Flint project root directory |
 | `permissionsFile` | string | `<root>/.permissions.json` | -- | Saved permission overrides, the care level and per-file approvals |
 | `workdirBase` | string | `""` | `AGENT_WORKDIR` | Working directory for file tools |

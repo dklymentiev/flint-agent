@@ -33,6 +33,18 @@ jobs:
       - run: npx vitest run --config vitest.config.unit.js
       - run: npx vitest run --config vitest.config.integration.js
 
+  # The suites above run as the owner of a checkout they can write. This job
+  # installs the package the way a server gets it (npm install -g, by root) and
+  # starts it as another user with no FLINT_* variables set.
+  install:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22.12"
+      - run: sudo env "PATH=$PATH" bash scripts/install-smoke.sh .
+
   audit:
     runs-on: ubuntu-latest
     steps:

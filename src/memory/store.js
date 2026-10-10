@@ -2,13 +2,14 @@ import { readFileSync, writeFileSync, renameSync, existsSync, mkdirSync, chmodSy
 import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import path from "node:path";
 import { config } from "../config.js";
-import { installIsWritable, homeStateDir } from "../data-dir.js";
+import { stateBesideInstall, homeStateDir } from "../data-dir.js";
 
 // The same order as installStateDir() in data-dir.js: the setting, then the
-// project when it can be written, then ~/.flint for a read-only install.
+// project when it is a checkout this user can write, then ~/.flint (an npm
+// install, a read-only copy).
 const memoryRoot = process.env.FLINT_DATA_DIR
   ? path.resolve(process.env.FLINT_DATA_DIR)
-  : installIsWritable() ? config.projectRoot : homeStateDir();
+  : stateBesideInstall() ? config.projectRoot : homeStateDir();
 const MEMORY_DIR = path.join(memoryRoot, "memory");
 const MEMORIES_FILE = path.join(MEMORY_DIR, "memories.jsonl");
 const HMAC_FILE = path.join(MEMORY_DIR, "memories.hmac");

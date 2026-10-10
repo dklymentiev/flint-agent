@@ -16,6 +16,7 @@ Usage:
   flint --check                  probe key, model and tool round-trip (exit 0, 10, 11, 12)
   flint --list                   list saved sessions
   flint --version                print the version
+  flint --update                 install the newest version and exit (never asks)
 
 Options:
   --provider <id>        provider to use (for example openrouter, openai, ollama)

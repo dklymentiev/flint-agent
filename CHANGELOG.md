@@ -7,6 +7,29 @@ All notable changes to Flint are written here. The format follows
 Each version is a `## [x.y.z] - YYYY-MM-DD` heading: `/update` reads these
 headings to show what changed between your version and the newest one.
 
+## [1.14.8] - 2026-10-10
+
+### Added
+- `flint --update` installs the newest version and exits, without the console
+  and without asking anything. Exit code 0 when it updated or was already the
+  newest, 1 otherwise.
+
+### Fixed
+- Updating an npm install deleted its sessions. Installed with
+  `npm install -g` into a folder you own (nvm, a per-user prefix, Windows),
+  Flint kept its sessions, saved permissions and file memory inside its own
+  package folder, and npm replaces that folder on every update, `/update`
+  included. They now live in `~/.flint`, which an update does not touch. A git
+  checkout keeps them next to itself as before.
+- `/update` on an install made by root (for example `sudo npm install -g`)
+  tried the install as the current user and printed the first line of npm's
+  permission error. It now attempts nothing, says the install belongs to
+  another user, and prints the command to run.
+- `/update` on a copy that was installed neither with git nor with npm advised
+  cloning the repository or installing from npm, which would have put a second
+  Flint beside the first. It now says the copy is updated the way it was put
+  there.
+
 ## [1.14.7] - 2026-10-09
 
 ### Fixed
