@@ -75,6 +75,7 @@ import { runAutoMode } from "./agent/auto.js";
 import { initPermissions, bulkSetPermission } from "./tools/permissions.js";
 import { startHeadless, prepareHeadless, headlessSetupRefusal } from "./headless-start.js";
 import { buildHeadlessResult, modifiedFilesIn, runTotals, createHeadlessRun, gitChangesIn, installHeadlessSignals } from "./headless-run.js";
+import { homeStateDir, stateDirRefusal } from "./data-dir.js";
 import { carriedBulkPermission } from "./restart.js";
 import { initSecurity } from "./security/index.js";
 import { fetchModelInfo } from "./api/client.js";
@@ -121,6 +122,15 @@ prepareHeadless(cli);
 
 if (cli.action === "list") {
   await runListSessions();
+}
+
+// Nowhere to write is settled here, once, before the first module that writes.
+{
+  const refusal = stateDirRefusal([homeStateDir(), config.sessionsDir]);
+  if (refusal) {
+    process.stderr.write(refusal + "\n");
+    process.exit(78); // EX_CONFIG, the same code a failed security init uses
+  }
 }
 
 // -- Auto-migrate env keys + first-run wizard --

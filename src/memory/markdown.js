@@ -1,11 +1,14 @@
 import { writeFileSync, existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { config } from "../config.js";
+import { installIsWritable, homeStateDir } from "../data-dir.js";
 import { loadAll, getMemoryStats } from "./store.js";
 
+// The same order as installStateDir() in data-dir.js: the setting, then the
+// project when it can be written, then ~/.flint for a read-only install.
 const memoryRoot = process.env.FLINT_DATA_DIR
   ? path.resolve(process.env.FLINT_DATA_DIR)
-  : config.projectRoot;
+  : installIsWritable() ? config.projectRoot : homeStateDir();
 const MEMORY_MD = path.join(memoryRoot, "MEMORY.md");
 
 export function updateMemoryMd() {

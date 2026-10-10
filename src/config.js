@@ -2,7 +2,7 @@ import "dotenv/config";
 import path from "node:path";
 import { statSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { homeStateDir, installStateDir } from "./data-dir.js";
+import { homeStateDir, installStateDir, defaultInstallStateDir } from "./data-dir.js";
 import { getProvider } from "./providers/registry.js";
 import { getActiveProvider, getLastModel } from "./providers/state.js";
 import { getKey, hasKey } from "./providers/keys.js";
@@ -237,7 +237,7 @@ export const config = {
   // carried another process's turns and another process's facts, and a unit
   // test that clears the facts table raced a live agent writing to it.
   sessionsDir: process.env.AGENT_PARENT_PORT
-    ? path.join(PROJECT_ROOT, "sessions", "children")
+    ? path.join(defaultInstallStateDir(), "sessions", "children")
     : path.join(installStateDir(), "sessions"),
   projectRoot: PROJECT_ROOT,
   // Where .permissions.json lives — the operator's own saved permissions,

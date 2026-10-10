@@ -7,6 +7,20 @@ All notable changes to Flint are written here. The format follows
 Each version is a `## [x.y.z] - YYYY-MM-DD` heading: `/update` reads these
 headings to show what changed between your version and the newest one.
 
+## [1.14.7] - 2026-10-09
+
+### Fixed
+- Flint installed where the user cannot write (a system install owned by root)
+  did not start: "EACCES: permission denied, mkdir <install>/sessions", unless
+  you already knew to set `FLINT_DATA_DIR`. Such an install now keeps its
+  sessions, permissions, file memory and child-agent sessions in `~/.flint`. An
+  install you can write (a checkout, a per-user npm prefix) keeps them next to
+  itself as before, and `FLINT_DATA_DIR` / `--data-dir` still wins over both.
+- A data folder that cannot be written is reported once, before anything else
+  starts: one message with the folder and the setting that moves it, exit
+  code 78. It used to surface from whichever part wrote first, as a security
+  error on one machine and a stack trace on another.
+
 ## [1.14.6] - 2026-10-08
 
 ### Fixed

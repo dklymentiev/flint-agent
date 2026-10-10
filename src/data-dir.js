@@ -20,6 +20,7 @@
 // resolve to the same custom directory — the setting still redirects every
 // write off the read-only install.
 
+import { mkdirSync, writeFileSync, unlinkSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -47,19 +48,62 @@ export function homeStateDir() {
   return join(homedir(), ".flint");
 }
 
+/** Create dir if needed and prove it takes a file. Throws what the OS says. */
+function proveWritable(dir) {
+  const probe = join(dir, `.write-probe-${process.pid}`);
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(probe, "");
+  unlinkSync(probe);
+}
+
+// Asked once: the install does not change owner while the process runs, and
+// config.js calls installStateDir() several times at import.
+let _installWritable = null;
+export function installIsWritable() {
+  if (_installWritable === null) {
+    try { proveWritable(PROJECT_ROOT); _installWritable = true; }
+    catch { _installWritable = false; }
+  }
+  return _installWritable;
+}
+
 /**
- * The install-relative state directory: PROJECT_ROOT by default, or the value
- * of FLINT_DATA_DIR (--data-dir) when set.  Modules that master kept next to
- * the install (sessions/, .permissions.json, knowledge/) use this.
+ * The install-relative state directory.  Modules that master kept next to the
+ * install (sessions/, .permissions.json, knowledge/) use this.  In order:
  *
- * Re-resolved on every call, see homeStateDir().
+ *   1. FLINT_DATA_DIR (--data-dir) when set.
+ *   2. PROJECT_ROOT when this user can write it: a checkout, a per-user npm
+ *      prefix.  Unchanged from before.
+ *   3. ~/.flint when they cannot: a system install owned by root
+ *      (/opt/..., /usr/lib/node_modules).  There a plain `flint` died on
+ *      "EACCES: mkdir <install>/sessions" and the only way to start at all
+ *      was to know about FLINT_DATA_DIR.
+ *
+ * Step 3 is a rule about where a read-only install keeps its state, decided
+ * before anything is written, not a second try after a write failed.  If
+ * ~/.flint cannot be written either, stateDirRefusal() stops the start.
+ *
+ * The env var is re-read on every call, see homeStateDir().
  *
  * @returns {string} absolute path
  */
 export function installStateDir() {
   const env = process.env.FLINT_DATA_DIR;
   if (env) return resolve(env);
-  return PROJECT_ROOT;
+  return defaultInstallStateDir();
+}
+
+/**
+ * Steps 2 and 3 above, without the env var.  For the one caller that must not
+ * follow FLINT_DATA_DIR: a child agent is started with FLINT_DATA_DIR pointing
+ * at its own folder (~/.flint/children/<port>), while its sessions belong
+ * with the parent's, in <state>/sessions/children, where the parent's log
+ * collector looks for them.
+ *
+ * @returns {string} absolute path
+ */
+export function defaultInstallStateDir() {
+  return installIsWritable() ? PROJECT_ROOT : join(homedir(), ".flint");
 }
 
 /**
@@ -83,4 +127,36 @@ export function dataDir() {
 export function setDataDir(dir) {
   if (dir) process.env.FLINT_DATA_DIR = resolve(dir);
   else delete process.env.FLINT_DATA_DIR;
+}
+
+/**
+ * What a start says when it has nowhere to write, or null when it has.
+ *
+ * Every module below these directories creates its own subdirectory on first
+ * use, so an unwritable one used to surface wherever the first write happened:
+ * as "[CRITICAL] Security init failed" from the audit log on one machine, as a
+ * bare stack from the plugin loader on another. Asked once, up front, the
+ * answer names the directory and the setting that moves it.
+ *
+ * There is deliberately no second place to try. Sessions and the audit trail
+ * that quietly land somewhere the operator did not choose are worse than a
+ * start that stops and says why.
+ *
+ * Proved by writing, not by access(): W_OK is not reliable on Windows, and a
+ * directory that cannot be created has no mode bits to ask about.
+ *
+ * @param {string[]} dirs - directories Flint must be able to create and write
+ * @returns {string|null}
+ */
+export function stateDirRefusal(dirs) {
+  for (const dir of dirs) {
+    try {
+      proveWritable(dir);
+    } catch (err) {
+      return `[flint] Cannot write to ${dir} (${err.code || err.message}).\n` +
+        "        Flint keeps its sessions, logs and audit trail there. Point it at a directory\n" +
+        "        this user can write with --data-dir <dir> or FLINT_DATA_DIR, and start again.";
+    }
+  }
+  return null;
 }
