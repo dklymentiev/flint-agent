@@ -40,6 +40,9 @@ PROVIDER_PID=""
 # machine's default prefix is not always root's: on a CI runner the Node
 # toolcache can be written by anyone, the test user could then write the
 # install, and that is the one thing this test has to rule out.
+# The umask too: what root installs must come out readable and not writable by
+# others whatever the caller's shell had.
+umask 022
 ROOTPREFIX="$(mktemp -d /opt/flint-smoke.XXXXXX)"
 chmod 755 "$ROOTPREFIX"
 export npm_config_prefix="$ROOTPREFIX"
@@ -97,7 +100,13 @@ command -v flint >/dev/null || fail "flint is not on PATH after the install"
 
 new_user flintsmoke
 as_user flintsmoke test -r "$PKG/package.json" || fail "the test user cannot read the install"
-if as_user flintsmoke test -w "$PKG"; then fail "the test user can write the install; this run would prove nothing"; fi
+if as_user flintsmoke test -w "$PKG"; then
+  # Say what the machine looks like: this has only ever failed on machines
+  # nobody can log in to.
+  echo "umask $(umask); $(id flintsmoke); commands run as uid $(as_user flintsmoke id -u)" >&2
+  ls -ldn "$ROOTPREFIX" "$ROOTPREFIX/lib" "$ROOTPREFIX/lib/node_modules" "$PKG" >&2
+  fail "the test user can write the install; this run would prove nothing"
+fi
 pass "installed in $PKG, not writable by the test user"
 
 node "$HERE/install-smoke-provider.mjs" "$WORK/port" &
