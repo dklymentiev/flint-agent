@@ -133,7 +133,7 @@ pass "--help"
 rc=0; out="$(as_user flintsmoke timeout 30 flint < /dev/null 2>&1)" || rc=$?
 [ "$rc" != "124" ] || fail "no key, no terminal: still running after 30 s"
 [ "$rc" != "0" ] || fail "no key, no terminal: exited 0"
-echo "$out" | grep -q "No API key" || fail "no key, no terminal: no sentence about the key. Got: $(echo "$out" | tail -3)"
+echo "$out" | grep -q "No API key" || { echo "$out" | tail -40 >&2; fail "no key, no terminal: exit $rc and no sentence about the key (output above)"; }
 pass "no key and no terminal: refused in one sentence"
 
 use_provider flintsmoke
