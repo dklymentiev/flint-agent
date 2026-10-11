@@ -104,7 +104,16 @@ export async function parseStreamResponse(response, onToken, onProgress) {
 // Parse non-streaming response
 export function parseResponse(data, onToken) {
   const choice = data.choices?.[0];
-  const message = choice?.message || { role: "assistant", content: "" };
+  // The same fields a streamed answer is built from, and no others. The
+  // provider's message also carries the model's reasoning (`reasoning`,
+  // `reasoning_details`), and kept whole it went into the history, back to
+  // the provider on every later call, and past every budget, which count the
+  // text and the tool calls: in one session it was two and a half times the
+  // size of the answers themselves. What a provider needs returned to carry
+  // on from a tool call travels on the call, and the calls are kept as sent.
+  const raw = choice?.message || {};
+  const message = { role: "assistant", content: raw.content || "" };
+  if (raw.tool_calls?.length) message.tool_calls = raw.tool_calls;
   if (message.content) onToken?.(message.content);
   return { message, usage: data.usage || null, generationId: data.id || null, servedModel: data.model || null };
 }

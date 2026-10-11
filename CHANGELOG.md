@@ -9,6 +9,20 @@ headings to show what changed between your version and the newest one.
 
 ## [Unreleased]
 
+## [1.14.10] - 2026-10-11
+
+### Fixed
+- A picture in the conversation made a working model look silent. A request
+  that carried an image was sent without streaming, and Flint, which drops a
+  call that shows no sign of an answer for 90 seconds, saw nothing from such a
+  call until the whole answer had arrived: any answer longer than that was
+  dropped and asked for again, and after three in a row the turn stopped with
+  "the provider sent no answer". An agent that had taken a screenshot lost its
+  turn this way. Requests with images are now streamed like the rest.
+- An answer received without streaming was stored with the model's reasoning
+  attached. It was sent back to the provider on every later call and counted
+  by none of the context budgets. Both kinds of answer are now stored alike.
+
 ## [1.14.9] - 2026-10-11
 
 ### Added

@@ -92,20 +92,50 @@ describe("content arrays preserved", () => {
     let capturedBody;
     globalThis.fetch = vi.fn(async (url, opts) => {
       capturedBody = JSON.parse(opts.body);
-      return {
-        ok: true,
-        json: async () => ({
-          id: "gen-1",
-          choices: [{ message: { role: "assistant", content: "ok" } }],
-          usage: { prompt_tokens: 5, completion_tokens: 2 },
-        }),
-      };
+      return { ok: true, body: buildSSEStream([{ id: "gen-1", choices: [{ delta: { content: "ok" } }], usage: { prompt_tokens: 5, completion_tokens: 2 } }]) };
     });
     const messages = [
       { role: "user", content: [{ type: "text", text: "hi" }, { type: "image_url", image_url: { url: "data:..." } }] },
     ];
     await chatCompletion(messages, [], () => {});
     expect(Array.isArray(capturedBody.messages[0].content)).toBe(true);
+  });
+});
+
+describe("streamed and whole answers", () => {
+  it("streams a request that carries an image, like any other", async () => {
+    let capturedBody;
+    globalThis.fetch = vi.fn(async (url, init) => {
+      capturedBody = JSON.parse(init.body);
+      return { ok: true, body: buildSSEStream([{ id: "gen-1", choices: [{ delta: { content: "ok" } }] }]) };
+    });
+    const messages = [
+      { role: "user", content: [{ type: "text", text: "hi" }, { type: "image_url", image_url: { url: "data:..." } }] },
+    ];
+    const result = await chatCompletion(messages, [], () => {});
+    expect(capturedBody.stream).toBe(true);
+    expect(result.message.content).toBe("ok");
+  });
+
+  it("stores a whole answer with the fields a streamed one has, and no reasoning", async () => {
+    const call = { id: "c1", type: "function", function: { name: "read_file", arguments: "{}" }, extra_content: { google: { thought_signature: "sig" } } };
+    globalThis.fetch = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({
+        id: "gen-1",
+        choices: [{ message: {
+          role: "assistant", content: "ok", refusal: null,
+          reasoning: "a long chain of thought",
+          reasoning_details: [{ type: "reasoning.text", text: "a long chain of thought" }],
+          tool_calls: [call],
+        } }],
+        usage: { prompt_tokens: 5, completion_tokens: 2 },
+      }),
+    }));
+    const whole = await chatCompletion([{ role: "user", content: "hi" }], [], null, { stream: false });
+    expect(Object.keys(whole.message).sort()).toEqual(["content", "role", "tool_calls"]);
+    // What the provider needs back to continue a tool call stays on the call.
+    expect(whole.message.tool_calls[0]).toEqual(call);
   });
 });
 

@@ -114,14 +114,16 @@ export async function chatCompletion(messages, tools, onToken, {
     return m;
   });
 
-  // Detect if messages contain images — disable streaming for image requests
-  const hasImages = cleanMessages.some((m) =>
-    Array.isArray(m.content) && m.content.some((p) => p.type === "image_url")
-  );
-
   const { adapter, provider } = getAdapter();
   const apiKey = config.apiKey;
-  const stream = streamOpt && !hasImages;
+  // A request with an image is streamed like any other. It used not to be,
+  // and the stall watchdog, which waits for the first sign of an answer, got
+  // none from such a call until the whole answer was there: every answer
+  // longer than its limit was dropped and asked for again. One screenshot
+  // left in the context cost an agent a 39-minute turn that way. No provider
+  // is known to refuse a streamed request with an image; one that does will
+  // say so in its error, and is to be named here then.
+  const stream = streamOpt;
 
   const headers = adapter.buildHeaders(provider, apiKey);
   const effectiveModel = modelOverride || config.model;

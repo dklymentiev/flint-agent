@@ -64,10 +64,6 @@ async function run(calls) {
       asked = true;
       return { ok: true, body: sse({ tool_calls: calls }) };
     }
-    // A request that carries an image is sent without streaming (client.js).
-    if (body.stream === false) {
-      return { ok: true, json: async () => ({ id: "gen-2", choices: [{ message: { role: "assistant", content: "done" } }], usage: { prompt_tokens: 10, completion_tokens: 5 } }) };
-    }
     return { ok: true, body: sse({ content: "done" }) };
   });
 
