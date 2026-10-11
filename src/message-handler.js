@@ -360,6 +360,7 @@ async function runTurn(windowTitle, content, name, { signal: externalSignal } = 
   let streamBuf = "";
   let streamedChars = 0;
   let tokensShownAt = 0;
+  let progressShownAt = 0;
   let streamTimer = null;
   let spinnerTimer = null;
 
@@ -589,6 +590,16 @@ async function runTurn(windowTitle, content, name, { signal: externalSignal } = 
       // the agent loop's own "tool" activity would overwrite that with less.
       if (kind === "tool") return;
       store.getState().setActivity({ kind, label, attempt });
+    },
+
+    // Reasoning, or a tool call being written: no text to print, so the
+    // counter on the activity row is the only sign that it moves. Roughly
+    // 4 characters a token, at most 4 times a second, as for onToken.
+    onProgress({ chars }) {
+      if (Date.now() - progressShownAt > 250) {
+        progressShownAt = Date.now();
+        store.getState().setActivityTokens(Math.round((chars || 0) / 4));
+      }
     },
 
     // The tools this turn got, and the class that decided it. Neither printed

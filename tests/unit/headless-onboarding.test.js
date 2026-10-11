@@ -132,6 +132,23 @@ async function load({ headless, tty }) {
   return { perms, initOnboarding, restore, config, markHeadless };
 }
 
+describe("a level handed down by a parent", () => {
+  // Owner, 2026-10-10: a child agent in a visible window, a real terminal, a
+  // data folder nobody had answered in. It drew the menu and waited.
+  let restore;
+  afterEach(() => { restore?.(); delete process.env.FLINT_CARE_LEVEL; });
+
+  it("is used, and the question is not asked, even at a real terminal", async () => {
+    process.env.FLINT_CARE_LEVEL = "permissive";
+    const ctx = await load({ headless: false, tty: true });
+    restore = ctx.restore;
+    await ctx.initOnboarding();
+    await tick(50);
+    expect(renders.calls.length).toBe(0);
+    expect(ctx.perms.getOnboardingAnswer()).toBe("permissive");
+  });
+});
+
 describe("--headless must never ask the first-run question", () => {
   let restore;
 

@@ -367,6 +367,7 @@ export async function runAgent(messages, callbacks = {}, { sessionId, signal, se
     onStepAbort, // (controller) => publish the step-scoped signal for Esc
     onScopeNote, // (text) => tool narrowing was applied — say so on screen
     onActivity, // ({kind, label, attempt}) => what is happening right now
+    onProgress, // ({kind, chars}) => characters of reasoning or of a tool call so far, this call
   } = callbacks;
 
   // What this session has already done, read BEFORE anything is appended for
@@ -926,14 +927,32 @@ export async function runAgent(messages, callbacks = {}, { sessionId, signal, se
       // and while it only returned a signal nothing ever removed them: one
       // listener per model call, for the life of the process.
       const stepSignal = anySignalAborted(signal, stepController.signal);
+      // What the model sends before, or instead of, text. Named on screen
+      // when it starts and counted as it grows: a file written in one tool
+      // call is a minute or two of this, and the row said `thinking` with a
+      // clock and nothing else, which is also what a hung call looks like.
+      let progressKind = null;
+      let progressChars = 0;
+      const callNo = apiCallCount;
+      const noteProgress = ({ kind, chars }) => {
+        if (kind !== progressKind) {
+          progressKind = kind;
+          progressChars = 0;
+          onActivity?.(kind === "tool"
+            ? { kind: "composing", label: `model is writing a tool call, call ${callNo}` }
+            : { kind: "reasoning", label: `model is reasoning, call ${callNo}` });
+        }
+        progressChars += chars || 0;
+        onProgress?.({ kind, chars: progressChars });
+      };
       let res;
       try {
         res = await callWithStallWatchdog(
-          (onTok, stallSignal) => chatCompletion(
+          (onTok, stallSignal, onProg) => chatCompletion(
             payload,
             tools,
             onTok,
-            { signal: stallSignal, model: modeModel },
+            { signal: stallSignal, model: modeModel, onProgress: onProg },
           ),
           {
             timeoutMs: watchdogTimeout,
@@ -950,6 +969,7 @@ export async function runAgent(messages, callbacks = {}, { sessionId, signal, se
             // pressed Esc, and a wait that continued regardless.
             signal: stepSignal.signal,
             onToken: onToken,
+            onProgress: noteProgress,
             onFirstToken: () => onActivity?.({ kind: "answering", label: `model is answering, call ${apiCallCount}` }),
           },
         );
@@ -1460,6 +1480,14 @@ export async function runAgent(messages, callbacks = {}, { sessionId, signal, se
     messages.push(reply);
     onStreamEnd?.();
 
+    // The images this turn's calls returned, shown after the last call is
+    // answered. Pushed as they arrived they sat between the tool results:
+    // assistant(2 calls) -> tool -> user(image) -> tool -> user(image). Gemini
+    // counts the answers that follow a call turn as one block and refused the
+    // request, 1 function response against 2 function calls; the history is
+    // kept, so the session then failed on every turn (2026-10-11).
+    const turnImages = [];
+
     // Execute tool calls
     for (const tc of reply.tool_calls) {
       // Check abort before each tool. The calls not yet run are answered
@@ -1615,23 +1643,10 @@ export async function runAgent(messages, callbacks = {}, { sessionId, signal, se
         });
         if (cannotSee) continue;
 
-        // Eager image replacement: before adding new image,
-        // replace ALL previous images with their text descriptions immediately.
-        // This prevents context bloat from sequential desktop_click(observe=instant).
-        for (const prev of messages) {
-          if (prev._isImage && !prev._compressed && Array.isArray(prev.content) &&
-              prev.content.some((c) => c.type === "image_url")) {
-            const prevText = prev.content.find((c) => c.type === "text");
-            const ref = prev._imagePath ? ` [file: ${prev._imagePath}]` : "";
-            prev.content = `[Image from ${prev._imageTool || "unknown"}${ref}: ${prevText?.text || "[Previous screenshot]"}]`;
-            prev._compressed = true;
-          }
-        }
-
-        // Image as user message — model sees FULL image for current iteration
-        // Only the LATEST image is kept as base64 in context
+        // Image as user message, held until every call of this turn has its
+        // tool result (see turnImages).
         const imageDataUrl = `data:image/${result.format || "png"};base64,${result.data}`;
-        messages.push({
+        turnImages.push({
           role: "user",
           content: [
             { type: "image_url", image_url: { url: imageDataUrl } },
@@ -1678,6 +1693,24 @@ export async function runAgent(messages, callbacks = {}, { sessionId, signal, se
           ...(swapId ? { _swap: swapId } : {}),
         });
       }
+    }
+
+    if (turnImages.length) {
+      // Eager image replacement: before adding new images, replace ALL
+      // previous images with their text descriptions immediately.
+      // This prevents context bloat from sequential desktop_click(observe=instant).
+      // Only an earlier turn's images: the ones asked for together in this
+      // turn are meant to be looked at together, so all of them stay.
+      for (const prev of messages) {
+        if (prev._isImage && !prev._compressed && Array.isArray(prev.content) &&
+            prev.content.some((c) => c.type === "image_url")) {
+          const prevText = prev.content.find((c) => c.type === "text");
+          const ref = prev._imagePath ? ` [file: ${prev._imagePath}]` : "";
+          prev.content = `[Image from ${prev._imageTool || "unknown"}${ref}: ${prevText?.text || "[Previous screenshot]"}]`;
+          prev._compressed = true;
+        }
+      }
+      messages.push(...turnImages);
     }
 
     // What tool_search loaded is usable on the very next call, not next turn.

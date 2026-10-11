@@ -19,6 +19,15 @@
 // not merely abandoned — the socket stays open otherwise), the operator is told
 // which attempt it is, and after the last attempt the turn stops with the
 // reason and how to continue.
+//
+// "Answer" is anything the model sends, not only text. Until 2026-10-10 it was
+// text alone, and a model asked to write an 1800-word file in one tool call
+// streams arguments for a minute or two and never a character of text:
+// xiaomi/mimo-v2.6-flash sent 1069 argument chunks in 42 s, gemini-3.1-pro
+// reasoned for 58 s. Both were dropped at exactly 90 s as "no answer", three
+// times, with the work thrown away and paid for each time. Reasoning
+// and tool-call chunks arrive as `onProgress` and disarm the clock like a
+// token does.
 
 /** Silence before a hung connection is dropped. Env override for tests. */
 export function firstTokenTimeoutMs() {
@@ -64,16 +73,17 @@ export function stallStopNote(attempts, timeoutMs) {
 /**
  * Run one model call under a watchdog on the FIRST answer.
  *
- * `run` receives `(onToken, signal)`. The signal aborts the in-flight request
- * when the watchdog fires, because an abandoned promise still holds an open
- * socket: on 2026-09-29 two of those were still open when the retry started.
+ * `run` receives `(onToken, signal, onProgress)`. The signal aborts the
+ * in-flight request when the watchdog fires, because an abandoned promise
+ * still holds an open socket: on 2026-09-29 two of those were still open when
+ * the retry started.
  *
- * @param {(onToken: Function, signal: AbortSignal) => Promise<any>} run
- * @param {object} opts - { timeoutMs, signal, onToken, onFirstToken, onStall }
+ * @param {(onToken: Function, signal: AbortSignal, onProgress: Function) => Promise<any>} run
+ * @param {object} opts - { timeoutMs, signal, onToken, onFirstToken, onProgress, onStall }
  * @returns {Promise<any>} the call's result
  * @throws {Error} with `.isStall` set when the watchdog fired
  */
-export async function callWithStallWatchdog(run, { timeoutMs, signal, onToken, onFirstToken, onStall } = {}) {
+export async function callWithStallWatchdog(run, { timeoutMs, signal, onToken, onFirstToken, onProgress, onStall } = {}) {
   const controller = new AbortController();
   let timer = null;
   let watched = false;
@@ -91,21 +101,32 @@ export async function callWithStallWatchdog(run, { timeoutMs, signal, onToken, o
     if (timer) { clearTimeout(timer); timer = null; }
   };
 
+  let textStarted = false;
   const forwardToken = (token) => {
-    if (watched) {
+    if (!textStarted) {
       // The model has started writing: there is no silence left to measure.
       // Told here rather than on the way out, because a call that streams for
       // a minute and then fails should still have reported that it started.
+      // On the first token whether or not reasoning disarmed the clock
+      // before it: "answering" is about the text, not about the clock.
+      textStarted = true;
       disarm();
       onFirstToken?.();
     }
     onToken?.(token);
   };
 
+  // Reasoning or a tool call being written: the model is working, so the
+  // silence is over. Not onFirstToken, which says that TEXT has started.
+  const forwardProgress = (progress) => {
+    if (watched) disarm();
+    onProgress?.(progress);
+  };
+
   let rejectStall = null;
   const stalled = new Promise((_, reject) => { rejectStall = reject; });
 
-  const call = (async () => run(forwardToken, controller.signal))();
+  const call = (async () => run(forwardToken, controller.signal, forwardProgress))();
   // The race decides; if the watchdog wins, the call's own later rejection is
   // nobody's problem and must not become an unhandled rejection.
   call.catch(() => {});

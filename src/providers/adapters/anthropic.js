@@ -179,7 +179,8 @@ export function parseResponse(data, onToken) {
 }
 
 // Parse streaming response (Anthropic SSE format)
-export async function parseStreamResponse(response, onToken) {
+// onProgress: thinking and tool input, see the OpenAI adapter.
+export async function parseStreamResponse(response, onToken, onProgress) {
   let text = "";
   const toolCalls = new Map(); // index → { id, name, arguments }
   let currentToolIndex = -1;
@@ -213,10 +214,13 @@ export async function parseStreamResponse(response, onToken) {
       if (delta?.type === "text_delta") {
         text += delta.text;
         onToken?.(delta.text);
+      } else if (delta?.type === "thinking_delta") {
+        onProgress?.({ kind: "reasoning", chars: delta.thinking?.length || 0 });
       } else if (delta?.type === "input_json_delta") {
         if (toolCalls.has(currentToolIndex)) {
           toolCalls.get(currentToolIndex).function.arguments += delta.partial_json;
         }
+        onProgress?.({ kind: "tool", chars: delta.partial_json?.length || 0 });
       }
     } else if (event.type === "message_delta") {
       if (event.usage) {

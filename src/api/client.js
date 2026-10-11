@@ -78,6 +78,8 @@ function combineAbortSignals(external, timeoutMs) {
  * @param {object} [opts.responseFormat] e.g. {type: "json_object"}
  * @param {number} [opts.timeoutMs] hard ceiling for this call
  * @param {boolean} [opts.stream=true] side calls want the whole answer at once
+ * @param {Function} [opts.onProgress] ({kind, chars}) reasoning and tool-call
+ *   chunks of a streamed answer, which are not tokens of text
  * @throws {BudgetExceededError} before sending anything, when a ceiling is spent
  */
 // Free mode notices go to the console through this (index.js sets it).
@@ -95,6 +97,7 @@ export async function chatCompletion(messages, tools, onToken, {
   responseFormat,
   timeoutMs,
   stream: streamOpt = true,
+  onProgress,
 } = {}) {
   // FIRST, before anything is built or sent. The ceilings are read live because
   // /budget can move them mid-session; 0 means unlimited, which is the default.
@@ -240,7 +243,7 @@ export async function chatCompletion(messages, tools, onToken, {
 
     const result = !stream
       ? adapter.parseResponse(await response.json(), onToken)
-      : await adapter.parseStreamResponse(response, onToken);
+      : await adapter.parseStreamResponse(response, onToken, onProgress);
 
     // Free mode: today's count for the footer, and one line when a fallback
     // answered instead of the primary.

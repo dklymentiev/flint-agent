@@ -20,7 +20,11 @@ beforeAll(async () => {
   process.env.FLINT_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "flint-stale-queue-"));
   bus = await import("../../../src/bus/index.js");
   db = (await import("../../../src/tasks/db.js")).getDb();
+  bus.setOwner(() => current);
 });
+
+// The session the instance under test is running.
+let current = null;
 
 // A row as an earlier run left it: its own created_at, status and session.
 function leftover({ channel, source, session, status = "pending", ageMinutes }) {
@@ -49,13 +53,15 @@ describe("the queue at start", () => {
     const queuedBeforeRestart = leftover({ channel: "user", source: "tui", session: now, ageMinutes: 1 });
     const reminder = leftover({ channel: "scheduler", source: "schedule", session: null, ageMinutes: 2 * 24 * 60 });
 
+    current = now;
     const r = bus.prepareQueueAtStart({ sessionId: now });
 
-    expect(r.expired).toBe(4);
-    for (const id of [benchTask, testJunk, otherSessionRecent, oldNoSession]) {
-      expect(statusOf(id).status).toBe("failed");
-      expect(statusOf(id).result).toMatch(/expired/);
-    }
+    // Since 1.14.9 a start does not touch another session's messages at all:
+    // that session may be running in the next window. They are not run here
+    // because drain never hands them to this instance, and what a session that
+    // is gone left behind is expired by age.
+    expect(r.expired).toBe(0);
+    expect(statusOf(otherSessionRecent).status).toBe("pending");
     expect(statusOf(queuedBeforeRestart).status).toBe("pending");
     expect(statusOf(reminder).status).toBe("pending");
 
@@ -63,10 +69,20 @@ describe("the queue at start", () => {
     let m;
     while ((m = bus.drain())) { drained.push(m.id); bus.complete(m.id, "test"); }
     expect(drained.sort()).toEqual([queuedBeforeRestart, reminder].sort());
+
+    bus.cleanup();
+    for (const id of [benchTask, testJunk]) {
+      expect(statusOf(id).status).toBe("failed");
+      expect(statusOf(id).result).toMatch(/expired/);
+    }
+    // An hour and a minute old: a day is not up, and nobody may run them.
+    expect(statusOf(oldNoSession).status).toBe("pending");
+    expect(statusOf(otherSessionRecent).status).toBe("pending");
   });
 
   it("still recovers this session's message that a crash left half done", () => {
     const now = "2026-10-03T08-00-00";
+    current = now;
     const crashed = leftover({ channel: "user", source: "tui", session: now, status: "processing", ageMinutes: 6 });
     const r = bus.prepareQueueAtStart({ sessionId: now });
     expect(r.recovered).toBeGreaterThanOrEqual(1);

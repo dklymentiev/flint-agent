@@ -20,6 +20,12 @@ import { getActivePlan, getActiveGoals } from "../tasks/queries.js";
 
 const log = createLogger("bus-drain");
 
+// This loop is the one consumer of the queue, so the session it runs is whose
+// queue it is. Named here, where the consumer is, and not at start-up in
+// index.js: whatever starts a drain loop then has its owner, and cannot forget
+// to name one and quietly read rows that have no session.
+bus.setOwner(() => store.getState().sessionId);
+
 let _running = false;
 let _drainResolvers = new Map(); // busId → { resolve, reject } for sync API callers
 const _asyncResults = new Map(); // busId → { response, stats, error, ts } for async poll

@@ -41,6 +41,8 @@ export function formatElapsed(ms) {
 //   · ready                          idle
 //   ⠚ thinking  00:03                waiting for the model
 //   ⠓ writing   00:07   ↓ 312 tok    the model is answering
+//   ⠓ reasoning 00:41   ↓ 2.1k tok   the model is reasoning, no text yet
+//   ⠓ composing 01:12   ↓ 2.6k tok   the model is writing a tool call
 //   ⠋ running   01:23                a tool is running
 // A 2x2 square of dots in one character, a gap running round it clockwise
 // (the owner's pick, 2026-10-01). Idle: a dot and "ready". The full square
@@ -71,6 +73,8 @@ export function activityVerb(state) {
     case "start": return "starting";
     case "call": return "thinking";
     case "answering": return "writing";
+    case "reasoning": return "reasoning";
+    case "composing": return "composing";
     case "tool": return "running";
     case "stall": return "stalled";
     case "wait": return "retrying";

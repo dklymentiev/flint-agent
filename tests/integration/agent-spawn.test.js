@@ -22,6 +22,12 @@ vi.mock("../../src/tools/filesystem.js", () => ({
   getDeniedPaths: vi.fn(() => []),
 }));
 
+// The parent's own care level, as the operator answered it.
+const parentCare = { level: "permissive" };
+vi.mock("../../src/tools/permissions.js", () => ({
+  getOnboardingAnswer: () => parentCare.level,
+}));
+
 // Mock task queries
 vi.mock("../../src/tasks/queries.js", () => ({
   getTask: vi.fn(),
@@ -94,6 +100,32 @@ afterEach(() => {
   for (const child of _fakeChildren) {
     child.emit("close", 0);
   }
+});
+
+describe("the child's care level", () => {
+  // Owner, 2026-10-10: a child opened in a visible window stopped on "How
+  // careful should Flint be?" with its task already sent. Its data folder is
+  // its own, so nobody had answered there.
+  it("is handed down from the parent, so the child has nothing to ask", async () => {
+    parentCare.level = "permissive";
+    await handlers.spawn_agent({ task: "inherit", port: 8101 });
+    expect(getLastSpawnOpts().env.FLINT_CARE_LEVEL).toBe("permissive");
+  });
+
+  it("can be asked stricter than the parent's", async () => {
+    parentCare.level = "permissive";
+    await handlers.spawn_agent({ task: "stricter", port: 8102, care: "safe" });
+    expect(getLastSpawnOpts().env.FLINT_CARE_LEVEL).toBe("safe");
+  });
+
+  it("cannot be asked looser than the parent's: nothing is spawned", async () => {
+    parentCare.level = "normal";
+    const before = mockSpawn.mock.calls.length;
+    const out = await handlers.spawn_agent({ task: "looser", port: 8103, care: "permissive" });
+    expect(out).toMatch(/^Error:/);
+    expect(mockSpawn.mock.calls.length).toBe(before);
+    parentCare.level = "permissive";
+  });
 });
 
 describe("spawn command construction", () => {

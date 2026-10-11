@@ -59,6 +59,12 @@ vi.mock("../../src/message-handler.js", () => ({
 beforeAll(async () => {
   port = await findFreePort();
   store = createMockStore();
+  // The drain loop reads the real store, and since 1.14.9 it takes only the
+  // messages of the session that store is running. In the product the server
+  // and the drain loop share one store; here the server gets a mock, so the
+  // real one is told the same session.
+  const { store: realStore } = await import("../../src/store/index.js");
+  realStore.getState().setSession("test-session", [], []);
   store.getState().setSession("test-session", [
     { role: "user", content: "hello" },
     { role: "assistant", content: "hi" },

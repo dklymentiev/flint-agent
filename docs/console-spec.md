@@ -54,7 +54,9 @@ the bottom is live.
   one row while a question waits, the rows around the cursor.
 - **Footer**: a fixed-width activity block (a 2x2 dot spinner while busy, a
   dot and `ready` when idle; one verb:
-  ready, thinking, writing, running, retrying; mm:ss; tokens arriving),
+  ready, thinking, reasoning, composing, writing, running, retrying; mm:ss;
+  tokens arriving; `reasoning` is the model thinking before any text,
+  `composing` is a tool call being written, such as the contents of a file),
   then session facts: model, cost, context as size/limit, background count,
   queue, care level, /help.
 

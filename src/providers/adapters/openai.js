@@ -34,7 +34,14 @@ export function getChatUrl(provider) {
 }
 
 // Parse streaming response — same as current client.js logic
-export async function parseStreamResponse(response, onToken) {
+//
+// `onProgress({ kind, chars })` is called for what the model sends that is not
+// text: "reasoning" and "tool" (a tool call being written). A long file
+// written in one tool call is a stream of argument chunks and no text at all,
+// and a caller that watched only onToken took a working model for a hung
+// connection. A router's keep-alive comment is not progress: parseSSE
+// drops it, and it says the router is up, not that the model is working.
+export async function parseStreamResponse(response, onToken, onProgress) {
   let content = "";
   const toolCalls = new Map();
   let generationId = null;
@@ -56,8 +63,17 @@ export async function parseStreamResponse(response, onToken) {
       onToken?.(delta.content);
     }
 
+    // One model's reasoning arrives under one of three names; Gemini through
+    // OpenRouter withholds the text and still sends the block.
+    const reasoning = delta.reasoning || delta.reasoning_content;
+    if (reasoning || delta.reasoning_details) {
+      onProgress?.({ kind: "reasoning", chars: typeof reasoning === "string" ? reasoning.length : 0 });
+    }
+
     if (delta.tool_calls) {
+      let chars = 0;
       for (const tc of delta.tool_calls) {
+        chars += (tc.function?.name?.length || 0) + (tc.function?.arguments?.length || 0);
         const idx = tc.index;
         if (!toolCalls.has(idx)) {
           toolCalls.set(idx, { id: "", type: "function", function: { name: "", arguments: "" } });
@@ -74,6 +90,7 @@ export async function parseStreamResponse(response, onToken) {
           if (!["index", "id", "type", "function"].includes(k)) existing[k] = tc[k];
         }
       }
+      onProgress?.({ kind: "tool", chars });
     }
   }
 

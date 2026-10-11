@@ -46,7 +46,7 @@ The console has no tabs. History is ordinary terminal scrollback: each line is w
 
 - Each tool call is one dim ledger line: category, verb, argument, measured result, time.
 - Each turn ends with a receipt: turn number, tools, files changed, tokens in/out, time, cost.
-- The footer shows the activity (`· ready` when idle; while busy a spinner and thinking, writing, running, retrying, with time and tokens arriving), then model, cost, context as size/limit, background count, queue, care level (`care:`) and spend level (`spend:`).
+- The footer shows the activity (`· ready` when idle; while busy a spinner and thinking, reasoning, composing, writing, running, retrying, with time and tokens arriving), then model, cost, context as size/limit, background count, queue, care level (`care:`) and spend level (`spend:`).
 - A message typed while the agent works waits above the input as `queued`. It moves into history when the agent reads it, between steps.
 - A paste of four or more lines or 300+ characters becomes a `[Pasted text #N]` token in the input; the model gets the full text.
 - The former tabs are commands now: `/tools`, `/ps`, `/logs`, `/kill`, `/sys`.
@@ -369,6 +369,7 @@ list_agents()
 
 - Each child runs on its own HTTP port (auto-assigned from 3010 if not given) and has its own data folder.
 - `spawn_agent` also takes `model`, `task_id` (a task the child claims and reports on) and `visible` (open a console window).
+- A child starts at its parent's care level and is not asked the first-run question. `care: "safe"` makes one child stricter; a child cannot be less careful than its parent.
 - Children inherit `AGENT_DENIED_PATHS`. At most `AGENT_MAX_CHILDREN` (default 5) run at once.
 - A child lives as long as its parent and stops about a minute after the parent is gone. `AGENT_CHILD_IDLE_TIMEOUT` makes it also stop after that many seconds idle (default 0, off), but not while it works.
 - Children can push datasets to the parent with `POST /dataset`.
@@ -529,6 +530,7 @@ Set in the environment or in `.env` in Flint's folder. Selected variables:
 | `FLINT_DATA_DIR` | none | Where sessions, tasks and memory go. Unset: everything in `~/.flint`, except in a git checkout you can write, which keeps its sessions next to itself. An npm install never keeps anything inside its own folder, because npm replaces that folder on every update |
 | `FLINT_UPDATE_CHECK` | on | `0` turns the update notice off |
 | `FLINT_PLUGIN_INSTALL` | `ask` | `allow` lets the agent install plugins without asking |
+| `FLINT_CARE_LEVEL` | unset | `safe`, `normal` or `permissive`: the care level, given from outside so the first-run question is not asked. A parent sets it for its children. Anything else stops the start |
 | `FLINT_SELF_VERIFY` | `off` | `on` adds a round that asks the model to check a change it made |
 | `AGENT_MAX_RESPONSE_TOKENS` | `16384` | Max tokens per model response |
 | `AGENT_MAX_ITERATIONS` | `500` | Max steps per turn |

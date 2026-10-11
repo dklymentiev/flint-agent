@@ -1,5 +1,5 @@
 // Free mode (docs/free-mode.md, F1-F7).
-import { describe, it, expect, vi, afterEach } from "vitest";
+import { describe, it, expect, vi, afterEach, beforeAll } from "vitest";
 import { existsSync, rmSync } from "node:fs";
 import path from "node:path";
 import os from "node:os";
@@ -125,6 +125,12 @@ describe("F6 messages", () => {
 });
 
 describe("F7 the command", () => {
+  // The first import of the command tree transforms most of src/ and takes
+  // about ten seconds on a cold cache, which is the whole test timeout: a
+  // clean container failed here on the import, not on the command. Paid once,
+  // with its own limit.
+  beforeAll(async () => { await import("../../src/commands/registry.js"); }, 60000);
+
   const fetchJson = async (url) => {
     if (url.endsWith("/models")) return { data: CATALOG };
     if (url.endsWith("/key")) return { data: { is_free_tier: false } };

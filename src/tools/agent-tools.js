@@ -11,6 +11,7 @@ import { activeChildren } from "./process-tools.js";
 import { getTask, getTasksByGoalAndStatus, getTaskStats } from "../tasks/queries.js";
 import { apiUrl } from "../api/address.js";
 import { trackTempFile } from "../temp-tracker.js";
+import { childCareLevel } from "../security/policies.js";
 
 const log = createLogger("agents");
 
@@ -98,6 +99,7 @@ export const agentToolDefs = [
           profile: { type: "string", description: "Profile for child agent (default: generic). Options: desktop, generic, marketer" },
           model: { type: "string", description: "Model for child agent (default: same as parent)" },
           visible: { type: "boolean", description: "Open agent in a new visible console window (default: false, runs headless)" },
+          care: { type: "string", enum: ["safe", "normal", "permissive"], description: "How careful the child is about asking before it changes things. Default: the same as this agent. May be stricter than this agent's level, never looser." },
         },
         required: ["task"],
       },
@@ -155,12 +157,18 @@ export function childDataDir(port, parentDir = homeStateDir()) {
 
 export function createAgentHandlers(store) {
   return {
-    async spawn_agent({ task, task_id, port, profile, model, visible }) {
+    async spawn_agent({ task, task_id, port, profile, model, visible, care }) {
       // Enforce max child agents limit
       const runningChildren = [..._childAgents.values()].filter((a) => a.status === "starting" || a.status === "running").length;
       if (runningChildren >= config.maxChildAgents) {
         return `Error: max child agents limit reached (${config.maxChildAgents}). Use list_agents() to see running agents, or kill some first.`;
       }
+
+      // Decided before anything is started: a refusal must not leave a child
+      // running or a port counted.
+      const { getOnboardingAnswer } = await import("./permissions.js");
+      const childCare = childCareLevel(getOnboardingAnswer(), care);
+      if (childCare.error) return `Error: ${childCare.error}`;
 
       const assignedPort = port || (_nextChildPort++);
       const childProfile = profile || "generic";
@@ -211,6 +219,9 @@ export function createAgentHandlers(store) {
       // stopped children between two questions, so a conversation with one
       // was impossible (owner, 2026-10-02). AGENT_CHILD_IDLE_TIMEOUT turns it on.
       childEnv.AGENT_IDLE_TIMEOUT = String(config.childIdleTimeout || 0);
+      // The child's own data folder has no answer to the care question, and a
+      // visible child would stop on it. See childCareLevel.
+      childEnv.FLINT_CARE_LEVEL = childCare.level;
       // Track agent depth for child-policy enforcement
       const currentDepth = parseInt(process.env.AGENT_DEPTH || "0", 10);
       childEnv.AGENT_DEPTH = String(currentDepth + 1);

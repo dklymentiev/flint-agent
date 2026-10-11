@@ -7,6 +7,50 @@ All notable changes to Flint are written here. The format follows
 Each version is a `## [x.y.z] - YYYY-MM-DD` heading: `/update` reads these
 headings to show what changed between your version and the newest one.
 
+## [Unreleased]
+
+## [1.14.9] - 2026-10-11
+
+### Added
+- `spawn_agent` takes `care`: how careful the child is, `safe`, `normal` or
+  `permissive`. Left out, the child gets its parent's level. A child may be
+  stricter than its parent and never looser; asking for looser is refused and
+  nothing is started. `FLINT_CARE_LEVEL` sets the level of any Flint from
+  outside, and a value that is not a level stops the start.
+
+### Fixed
+- Reading two images in one step broke the conversation on Gemini. When the
+  model made several tool calls at once and one of them returned an image, the
+  image was put into the history between the tool results, and Gemini refused
+  the request: "the number of function response parts is equal to the number
+  of function call parts". The history is kept, so every later turn of that
+  session failed the same way. All calls of a step are now answered first and
+  the images follow; images asked for together are shown together. A session
+  that already hit this stays broken: start a new one.
+- A child agent opened in a visible window stopped on "How careful should
+  Flint be?" and waited for a person, with its task already sent. A child
+  keeps its data in a folder of its own, where nobody had answered the
+  question. It now starts at the level its parent hands it and does not ask.
+- Several Flints started by one user ran each other's messages. They share one
+  queue in `~/.flint/tasks.db`, and each took whatever was waiting: a task sent
+  over the API to one Flint was run by another, with the API's automatic
+  approval, in the middle of an unrelated conversation, and a line typed into
+  one console was answered in a different window. Starting a Flint also
+  cancelled the messages the others had not finished. An instance now sees,
+  takes, recovers and expires only the messages of its own session, and
+  `GET /message/<id>` answers 404 for another session's id. A reminder is still
+  the operator's and not a session's: the first instance to take it runs it,
+  once. A message nobody took within a day is expired.
+- A model that was working was dropped as "the provider sent no answer for
+  90s". The clock on a model call waited for the first character of text, and
+  a long file written in one tool call, or a long stretch of reasoning, sends
+  none: the call was cut at 90 seconds, retried, cut again, and after three
+  times the turn stopped, with the work thrown away and paid for each time.
+  Reasoning and a tool call being written now count as an answer. The footer
+  says `reasoning` or `composing` while they arrive, with the tokens counted,
+  where it used to say `thinking` and nothing else. A call on which nothing at
+  all arrives is still dropped after 90 seconds.
+
 ## [1.14.8] - 2026-10-10
 
 ### Added

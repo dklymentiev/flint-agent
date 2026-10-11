@@ -147,6 +147,52 @@ export function parseLevelAnswer(answer) {
 }
 
 /**
+ * The care level a child agent starts at.
+ *
+ * A child has a data folder of its own, so "How careful should Flint be?" has
+ * never been answered there, and a child in a visible window drew the question
+ * and waited for a person with its task already sent (owner, 2026-10-10). The
+ * parent hands its own level down. A stricter one may be asked for; a looser
+ * one is refused, because the level is the operator's decision about this
+ * machine and a model picking `permissive` for its child would be the model
+ * answering the question for the operator. Refused, not lowered to the
+ * parent's: the caller asked for something it did not get and must hear so.
+ *
+ * @param {string|null} parentLevel - the parent's answer, null if never asked
+ * @param {string} [asked] - the level asked for the child
+ * @returns {{level: string}|{error: string}}
+ */
+export function childCareLevel(parentLevel, asked) {
+  // Never asked: the parent itself runs at the documented default (getPermission).
+  const parent = parentLevel || DEFAULT_ONBOARDING_LEVEL;
+  if (asked == null || asked === "") return { level: parent };
+  if (!LEVELS.includes(asked)) {
+    return { error: `unknown care level "${asked}". Expected one of: ${LEVELS.join(", ")}` };
+  }
+  if (LEVELS.indexOf(asked) > LEVELS.indexOf(parent)) {
+    return { error: `a child cannot be less careful than its parent (parent: ${parent}, asked: ${asked})` };
+  }
+  return { level: asked };
+}
+
+/**
+ * The care level handed to this process from outside, by a parent agent or by
+ * whoever started it: FLINT_CARE_LEVEL. A value that is not a level is an
+ * error, not a reason to fall to the default: a typo must not start Flint at
+ * a level nobody named.
+ *
+ * @returns {{level: string|null}|{error: string}}
+ */
+export function runCareLevel(env = process.env) {
+  const given = env.FLINT_CARE_LEVEL;
+  if (given == null || given === "") return { level: null };
+  if (!LEVELS.includes(given)) {
+    return { error: `FLINT_CARE_LEVEL="${given}" is not a care level. Expected one of: ${LEVELS.join(", ")}` };
+  }
+  return { level: given };
+}
+
+/**
  * Which dangerous-command patterns ask, by level.
  *
  * The list is indexed rather than copied three times: three copies of one list

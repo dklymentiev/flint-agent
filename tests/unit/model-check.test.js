@@ -115,6 +115,12 @@ describe("M3 results", () => {
 });
 
 describe("M4 the command", () => {
+  // The first import of the command tree transforms most of src/ and takes
+  // about ten seconds on a cold cache, which is the whole test timeout: a
+  // clean container failed here on the import, not on the command. Paid once,
+  // with its own limit.
+  beforeAll(async () => { await import("../../src/commands/registry.js"); }, 60000);
+
   async function setup() {
     const { createMockStore } = await import("../helpers/mock-store.js");
     const { initCommands, tryHandleCommand } = await import("../../src/commands/registry.js");

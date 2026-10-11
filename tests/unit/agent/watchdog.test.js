@@ -98,6 +98,44 @@ describe("callWithStallWatchdog", () => {
     expect(firstTokenAt).not.toBeNull();
   });
 
+  it("does not drop a call that is reasoning or writing a tool call, with no text at all", async () => {
+    // 2026-10-10: an 1800-word file written in one tool call. The
+    // model streamed arguments for longer than the timeout and never a
+    // character of text; the watchdog dropped it three times as "no answer".
+    vi.useFakeTimers();
+    const kinds = [];
+    const firstAnswer = [];
+    const p = callWithStallWatchdog(
+      async (_onToken, _signal, onProgress) => {
+        await new Promise((r) => setTimeout(r, 1_000));
+        onProgress({ kind: "reasoning", chars: 40 });
+        await new Promise((r) => setTimeout(r, 200_000));
+        onProgress({ kind: "tool", chars: 9000 });
+        await new Promise((r) => setTimeout(r, 200_000));
+        return "tool call";
+      },
+      { timeoutMs: 90_000, onProgress: (x) => kinds.push(x.kind), onFirstToken: () => firstAnswer.push("text") },
+    );
+    await vi.advanceTimersByTimeAsync(500_000);
+    expect(await p).toBe("tool call");
+    expect(kinds).toEqual(["reasoning", "tool"]);
+    // Progress is not text: "the model is answering" is said for text only.
+    expect(firstAnswer).toEqual([]);
+  });
+
+  it("still drops a call on which nothing at all arrives", async () => {
+    vi.useFakeTimers();
+    const p = callWithStallWatchdog(
+      (_onToken, signal, _onProgress) => new Promise((resolve) => {
+        signal.addEventListener("abort", () => resolve("ignored"));
+      }),
+      { timeoutMs: 90_000, onProgress: () => {} },
+    );
+    const assertion = expect(p).rejects.toMatchObject({ isStall: true });
+    await vi.advanceTimersByTimeAsync(90_001);
+    await assertion;
+  });
+
   it("does not fire the watchdog on a call that already ended", async () => {
     vi.useFakeTimers();
     const p = callWithStallWatchdog(async () => "fast", { timeoutMs: 90_000 });

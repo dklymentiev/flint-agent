@@ -1,6 +1,6 @@
 # Flint Agent -- Technical Reference
 
-**Version:** 1.14.8
+**Version:** 1.14.9
 **Checked against the code:** 2026-10-03
 **Source:** The main exported functions, tools, endpoints, commands and config options in `src/`
 
@@ -751,7 +751,7 @@ Multi-agent tools for spawning and communicating with child agents.
 
 | Tool | Parameters | Description |
 |---|---|---|
-| `spawn_agent` | `task, task_id?, port?, profile?, model?, visible?` | Spawn child agent process |
+| `spawn_agent` | `task, task_id?, port?, profile?, model?, visible?, care?` | Spawn child agent process |
 | `ask_agent` | `port, message` | Send message to running child agent and wait for its answer |
 | `list_agents` | -- | List all child agents with status |
 | `wait_tasks` | `goal_id, timeout?` | Wait for all tasks in a goal to complete (polling) |
@@ -939,6 +939,22 @@ Auth: a paired token (`src/security/pairing.js`), a parent's spawn secret (`AGEN
 
 SQLite-backed priority queue for all input channels.
 
+#### Whose message it is
+
+Every Flint a user starts by hand shares one `~/.flint/tasks.db`, so the queue
+is shared too. A message belongs to the session it was sent to (`session_id`),
+and an instance sees only its own: `drain`, `pending`, `stats`, `recover`,
+`getMessage` and the start-up expiry all read through the same rule. The owner
+is named once, by the drain loop (`setOwner`), as the session the store is
+running, and is asked each time because `/new` changes it.
+
+- `push` without a `sessionId` stamps the pushing instance's session.
+- A reminder (`channel = 'scheduler'`) is the exception: while it waits, any
+  instance may take it. Taking it is a conditional `UPDATE` (only a row still
+  pending can be claimed) that also makes it the taker's, so it runs once.
+- A start never touches another session's rows. What a session that is gone
+  left behind is failed by `cleanup` after 24 hours, and is never run.
+
 #### Priority Levels
 
 | Constant | Value | Channel |
@@ -956,7 +972,7 @@ Push message to queue. Fields: `channel, content, priority, source, metadata, se
 
 #### `drain()` -> `object|null`
 
-Atomically pops highest-priority pending message, sets status to "processing".
+Claims this instance's highest-priority pending message, sets status to "processing".
 
 #### `complete(id, result)` / `fail(id, error)` -> `void`
 
@@ -964,11 +980,11 @@ Mark message as done or failed.
 
 #### `recover(staleMinutes)` -> `number`
 
-Crash recovery: resets stale "processing" messages back to "pending".
+Crash recovery: resets this instance's stale "processing" messages back to "pending".
 
 #### `cleanup(doneHours, failedDays)` -> `{ done, failed }`
 
-Deletes old processed/failed messages.
+Deletes old processed/failed messages, and fails messages no session took within 24 hours.
 
 #### `stats()` -> `{ pending, processing, done, failed, total }`
 

@@ -8,7 +8,8 @@ import { loadPlugins } from "./plugins/loader.js";
 import { ensureOwnEnv } from "./tools/own-env.js";
 import { setPluginContext } from "./tools/plugin-tools.js";
 import { getSandboxMode } from "./sandbox/backend.js";
-import { initPermissions, askOnboardingIfNeeded, getOnboardingState, getConfirmTimeoutMs } from "./tools/permissions.js";
+import { initPermissions, askOnboardingIfNeeded, getOnboardingState, getConfirmTimeoutMs, saveOnboardingAnswer } from "./tools/permissions.js";
+import { runCareLevel } from "./security/policies.js";
 import { whileWaitingForOperator } from "./startup-watchdog.js";
 import { prepareHeadless } from "./headless-start.js";
 import { initSecurity } from "./security/index.js";
@@ -160,6 +161,20 @@ function initStore() {
  * level nobody chose is never written on their behalf.
  */
 export async function initOnboarding() {
+  // A level handed down from outside answers the question for this run, in
+  // every mode: a child agent in a visible window has a real terminal and a
+  // data folder nobody has answered in, and it drew the menu and waited with
+  // its task already sent (owner, 2026-10-10). Saved like any answer; in a
+  // child that is the child's own folder.
+  const handed = runCareLevel();
+  if (handed.error) {
+    console.error(`[flint] ${handed.error}`);
+    process.exit(2);
+  }
+  if (handed.level) {
+    saveOnboardingAnswer(handed.level);
+    return;
+  }
   // A --headless run has nobody to answer. Under sudo the process may still
   // hold a pseudoterminal, so the isTTY check below is not enough: the menu
   // was drawn, the watchdog countdown was lifted by whileWaitingForOperator,
