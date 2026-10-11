@@ -394,3 +394,31 @@ describe("result event provider_error", () => {
     expect(results[1].provider_error).toBeNull();
   });
 });
+
+describe("the fallback model", () => {
+  it("the switch is an event, the replies after it name the model that answered, the result carries it", async () => {
+    const fallback = { from: "m", to: "spare/model", reason: "empty" };
+    const h = harness(async (_content, { observer }) => {
+      observer.onModelFallback({ ...fallback, text: "Model m is unavailable. This turn carries on with the fallback model spare/model." });
+      observer.onReply({ content: "hello" }, {}, { model: "spare/model" });
+      return { text: "hello", stop_reason: "done", fallback };
+    });
+    h.user("hi");
+    await tick();
+    expect(h.out.find((o) => o.type === "model_fallback")).toMatchObject({ ...fallback, session_id: "s1" });
+    expect(h.out.find((o) => o.type === "assistant").message.model).toBe("spare/model");
+    expect(h.out.find((o) => o.type === "result")).toMatchObject({ subtype: "success", fallback });
+  });
+
+  it("a turn that stayed on its model: no event, the configured model, null on the result", async () => {
+    const h = harness(async (_content, { observer }) => {
+      observer.onReply({ content: "hello" }, {}, { model: "m" });
+      return { text: "hello", stop_reason: "done", fallback: null };
+    });
+    h.user("hi");
+    await tick();
+    expect(h.out.some((o) => o.type === "model_fallback")).toBe(false);
+    expect(h.out.find((o) => o.type === "assistant").message.model).toBe("m");
+    expect(h.out.find((o) => o.type === "result").fallback).toBeNull();
+  });
+});

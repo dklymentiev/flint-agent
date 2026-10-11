@@ -233,8 +233,12 @@ export function assertWithinBudget(limits) {
  * caller that has to remember this is a caller that will forget.
  * Safe with a missing/!ok usage object.
  * @param {"agent"|"classifier"|"judge"|"extractor"|"facts"|"outcome"} source
+ * @param {object|null} [pricing] the rate card of the model that made the call.
+ *   Left out, the main model's card is used. An explicit null says the caller
+ *   knows the model and not its price: the call then costs 0 and is flagged
+ *   estimated, instead of being billed at the main model's rate.
  */
-export function recordUsage(source, usage, pricing = null) {
+export function recordUsage(source, usage, pricing) {
   const entry = ledger[source];
   if (!entry) {
     // A source that is spent but not declared is money leaving with no row to
@@ -254,7 +258,7 @@ export function recordUsage(source, usage, pricing = null) {
     // and the end-of-turn merge that used to catch this is gone.
     return { ...emptyEntry(), calls: 1, estimated: true };
   }
-  const { cost, estimated } = priceUsage(u, pricing || pricingSource());
+  const { cost, estimated } = priceUsage(u, pricing === undefined ? pricingSource() : pricing);
   entry.calls += 1;
   entry.promptTokens += u.promptTokens;
   entry.completionTokens += u.completionTokens;

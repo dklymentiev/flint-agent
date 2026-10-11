@@ -264,7 +264,7 @@ async function _processOne(msg) {
     // POST /message + GET /message/:id saw an empty tool list and scored every
     // tool-backed probe as a miss. The readiness harness is exactly that.
     : { response: result?.text || "", stats: result?.stats || {}, stop_reason: stopReason,
-        toolCalls: result?.toolCalls || [], repoClaimGap: result?.repoClaimGap || false, truncated_at: result?.truncated_at || null, ts: Date.now() };
+        toolCalls: result?.toolCalls || [], repoClaimGap: result?.repoClaimGap || false, truncated_at: result?.truncated_at || null, fallback: result?.fallback || null, ts: Date.now() };
   _asyncResults.set(msg.id, resultData);
 
   // Resolve waiting API callers (sync mode)
@@ -274,7 +274,7 @@ async function _processOne(msg) {
     if (error) {
       waiter.resolve({ error: error.message });
     } else {
-      waiter.resolve({ response: result?.text || "", stats: result?.stats || {}, stop_reason: stopReason, toolCalls: result?.toolCalls || [], repoClaimGap: result?.repoClaimGap || false, truncated_at: result?.truncated_at || null });
+      waiter.resolve({ response: result?.text || "", stats: result?.stats || {}, stop_reason: stopReason, toolCalls: result?.toolCalls || [], repoClaimGap: result?.repoClaimGap || false, truncated_at: result?.truncated_at || null, fallback: result?.fallback || null });
     }
   }
 

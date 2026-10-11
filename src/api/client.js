@@ -80,6 +80,8 @@ function combineAbortSignals(external, timeoutMs) {
  * @param {boolean} [opts.stream=true] side calls want the whole answer at once
  * @param {Function} [opts.onProgress] ({kind, chars}) reasoning and tool-call
  *   chunks of a streamed answer, which are not tokens of text
+ * @param {object|null} [opts.pricing] the rate card of this call's model, for a
+ *   call that is not on the main model; null says its price is not known
  * @throws {BudgetExceededError} before sending anything, when a ceiling is spent
  */
 // Free mode notices go to the console through this (index.js sets it).
@@ -98,6 +100,7 @@ export async function chatCompletion(messages, tools, onToken, {
   timeoutMs,
   stream: streamOpt = true,
   onProgress,
+  pricing,
 } = {}) {
   // FIRST, before anything is built or sent. The ceilings are read live because
   // /budget can move them mid-session; 0 means unlimited, which is the default.
@@ -260,7 +263,7 @@ export async function chatCompletion(messages, tools, onToken, {
     // The caller does not record anything. Two sources were declared and never
     // wired to a counter before this moved here, both times because recording
     // was somebody else's job.
-    const entry = recordUsage(source, result.usage);
+    const entry = recordUsage(source, result.usage, pricing);
     // Push the call's delta into the session store right now, so the cost
     // shown by the status line, /status and the API usage block climbs after
     // every call during a turn instead of only after it ends. The turn-end

@@ -128,6 +128,20 @@ export const EXIT_ERROR = 1;
 export const EXIT_STOPPED = 2;
 
 /**
+ * The exit code for the way a turn ended by itself (the agent loop's
+ * stop_reason). Only "done" is the task's own end. "budget" is a ceiling
+ * cutting the turn, the same kind of stop as the time limit. Everything else
+ * (the model went silent, answered with nothing, the provider failed, the
+ * model is not there, a command was refused until the turn gave up) is a turn
+ * that did not get anywhere.
+ */
+export function exitCodeForTurn(stopReason) {
+  if (!stopReason || stopReason === "done") return EXIT_DONE;
+  if (stopReason === "budget") return EXIT_STOPPED;
+  return EXIT_ERROR;
+}
+
+/**
  * How long a turn gets to unwind after a stop was asked for. An abort reaches
  * a model call and a command at once; this is for whatever does not listen.
  */
@@ -236,9 +250,16 @@ export function createHeadlessRun({ app, processMessage, saveSession, buildResul
       logError("[headless] Error: " + (failure?.message || String(failure)) + "\n");
       return finish(EXIT_ERROR, null);
     }
-    const output = buildResult("done", result);
+    // How the turn itself ended, as the agent loop reported it. This used to
+    // be "done" and exit 0 for whatever came back: a turn that ended on three
+    // empty answers from the model, with nothing written, read as a success
+    // to a caller that looked at the exit code or at stop_reason.
+    const ended = result.stop_reason || "done";
+    const output = buildResult(ended, result);
     output.truncated_at = result.truncated_at || null;
-    return finish(EXIT_DONE, output);
+    // `model` is the configured one; this says the turn left it, and for what.
+    output.fallback = result.fallback || null;
+    return finish(exitCodeForTurn(ended), output);
   }
 
   let childrenKilled = false;

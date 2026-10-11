@@ -385,9 +385,9 @@ async function runTurn(windowTitle, content, name, { signal: externalSignal } = 
   let thinkBuf = "";
   let thinkCount = 0;
 
-  let text, stats, stop_reason, retryAfter, filesChanged, repoClaimGap, truncated_at, providerError;
+  let text, stats, stop_reason, retryAfter, filesChanged, repoClaimGap, truncated_at, providerError, fallback;
   try {
-  ({ text, stats, stop_reason, retryAfter, filesChanged, repoClaimGap, truncated_at, providerError } = await runAgent(apiMessages, {
+  ({ text, stats, stop_reason, retryAfter, filesChanged, repoClaimGap, truncated_at, providerError, fallback } = await runAgent(apiMessages, {
     // Esc stops the current step, not the task. The loop hands over its
     // own step-scoped signal here; Esc reaches that one and never the
     // whole-loop controller in the options below, so answering a question typed
@@ -620,9 +620,18 @@ async function runTurn(windowTitle, content, name, { signal: externalSignal } = 
       store.setState({ _iterationCount: callNum });
     },
 
-    onApiResponse(callNum, reply, usage) {
+    // The main model stopped answering and the turn carries on with the
+    // fallback. A line that stays on screen, not a status that the next step
+    // replaces: the operator has to see which model did the rest.
+    onModelFallback(info) {
+      log.warn("model-fallback", { from: info.from, to: info.to, reason: info.reason });
+      store.getState().addLine(chalk.yellow(`${INDENT}${info.text}`));
+      tellObserver("onModelFallback", info);
+    },
+
+    onApiResponse(callNum, reply, usage, info) {
       logApiCall(sessionId, callNum, null, null, reply, usage);
-      tellObserver("onReply", reply, usage);
+      tellObserver("onReply", reply, usage, info);
       // Live context token update — show current context size during multi-step tasks
       if (usage?.prompt_tokens) {
         store.setState({ lastContextTokens: usage.prompt_tokens, contextEstimated: false });
@@ -803,7 +812,7 @@ const callsThisTurn = messages
   // The session's tool counts were added in the `finally` above, so an
   // interrupted turn is counted too.
 
-  return { text, stats: { ...stats, cost }, stop_reason: stop_reason || "done", retryAfter: retryAfter ?? null, toolCalls: callsThisTurn, repoClaimGap, truncated_at: truncated_at || null, providerError: providerError || null };
+  return { text, stats: { ...stats, cost }, stop_reason: stop_reason || "done", retryAfter: retryAfter ?? null, toolCalls: callsThisTurn, repoClaimGap, truncated_at: truncated_at || null, providerError: providerError || null, fallback: fallback || null };
 }
 
 export async function handlePendingAction() {

@@ -295,6 +295,7 @@ export function startServer(port, store, processMessage, opts = {}) {
               response.toolCalls = asyncResult.toolCalls || [];
               response.repoClaimGap = asyncResult.repoClaimGap || false;
               response.truncated_at = asyncResult.truncated_at || null;
+              response.fallback = asyncResult.fallback || null;
               if (asyncResult.error) response.error = asyncResult.error;
             } else {
               // Fallback: DB result (may be truncated to 500 chars)

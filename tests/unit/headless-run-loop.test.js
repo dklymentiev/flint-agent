@@ -145,6 +145,51 @@ describe("headless run loop: --time-limit", () => {
 // A real SIGTERM cannot be delivered to a Node handler on Windows (the OS
 // terminates the process), so the tests that send one are skipped there. The
 // handler is called here directly, which runs the same code on every platform.
+// The turn's own ending. The agent loop says how a turn ended (stop_reason),
+// and the run used to throw that away: whatever came back from a turn that
+// nobody stopped from outside was recorded as "done" with exit 0. A turn that
+// ended on three empty answers from the model, having written nothing, was a
+// success to whoever read the exit code.
+describe("headless run loop: a turn that did not get to its own end", () => {
+  const stopped = (stop_reason) => [async () => ({ text: "Stopped: and why.", toolCalls: [], stop_reason })];
+
+  it.each(["empty", "stall", "error", "model-not-found", "text-tool-call", "denied"])(
+    "a turn that ended as '%s' is recorded as that, exit 1, with the record",
+    async (reason) => {
+      const { run, out } = harness(stopped(reason));
+      await run.run({ task: "t", timeLimitSec: 10 });
+      expect(out.written).toEqual([expect.objectContaining({ stop_reason: reason, response: "Stopped: and why." })]);
+      expect(out.code).toBe(1);
+    },
+  );
+
+  it("a turn cut by a ceiling is 'budget', exit 2: stopped before its end, like the time limit", async () => {
+    const { run, out } = harness(stopped("budget"));
+    await run.run({ task: "t", timeLimitSec: 10 });
+    expect(out.written).toEqual([expect.objectContaining({ stop_reason: "budget" })]);
+    expect(out.code).toBe(2);
+  });
+
+  it("a turn that says 'done' is still 'done', exit 0", async () => {
+    const { run, out } = harness(stopped("done"));
+    await run.run({ task: "t", timeLimitSec: 10 });
+    expect(out.written).toEqual([expect.objectContaining({ stop_reason: "done" })]);
+    expect(out.code).toBe(0);
+  });
+
+  it("the time limit still wins over the turn's own reason", async () => {
+    const { run, out } = harness([async ({ signal }) => {
+      await new Promise((resolve) => signal.addEventListener("abort", resolve, { once: true }));
+      return { text: "cut", toolCalls: [], stop_reason: "error" };
+    }]);
+    const done = run.run({ task: "t", timeLimitSec: 3 });
+    await vi.advanceTimersByTimeAsync(3000);
+    await done;
+    expect(out.written).toEqual([expect.objectContaining({ stop_reason: "time" })]);
+    expect(out.code).toBe(2);
+  });
+});
+
 describe("headless run loop: SIGTERM / SIGINT", () => {
   /** A stand-in for `process`: only what installHeadlessSignals uses. */
   const fakeProcess = () => {
@@ -234,5 +279,21 @@ describe("headless run loop: SIGTERM / SIGINT", () => {
     await done;
     expect(out.written).toEqual([expect.objectContaining({ stop_reason: "killed" })]);
     expect(out.code).toBe(2);
+  });
+});
+
+describe("headless run loop: the fallback model", () => {
+  it("the record says the turn left its model, and for which", async () => {
+    const fallback = { from: "main/model", to: "spare/model", reason: "empty" };
+    const { run, out } = harness([async () => ({ text: "finished", toolCalls: [], stop_reason: "done", fallback })]);
+    await run.run({ task: "t", timeLimitSec: 0 });
+    expect(out.written).toEqual([expect.objectContaining({ stop_reason: "done", fallback })]);
+    expect(out.code).toBe(0);
+  });
+
+  it("a turn that stayed on its model says null", async () => {
+    const { run, out } = harness([async () => ({ text: "finished", toolCalls: [], stop_reason: "done", fallback: null })]);
+    await run.run({ task: "t", timeLimitSec: 0 });
+    expect(out.written[0].fallback).toBeNull();
   });
 });

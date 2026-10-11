@@ -7,7 +7,7 @@ import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import {
   parseInputLine, userContent, assistantEvent, toolResultEvent,
-  resultEvent, resultSubtype, controlResponse, controlError, steerStatus, textDelta, toolStartEvent, textEvent,
+  resultEvent, resultSubtype, controlResponse, controlError, steerStatus, textDelta, toolStartEvent, textEvent, modelFallbackEvent,
 } from "./protocol.js";
 
 // Do not expose <thinking> blocks to the host. Keep a possible partial tag
@@ -154,7 +154,7 @@ export function createStdioSession({ write, run, sessionId, model, onIdleEnd, on
           write(steerStatus(item.id, "delivered", sessionId));
         }
       },
-      onReply(reply, usage) {
+      onReply(reply, usage, info) {
         visible.end();
         apiCalls++;
         for (const tc of reply?.tool_calls || []) {
@@ -163,8 +163,11 @@ export function createStdioSession({ write, run, sessionId, model, onIdleEnd, on
           if (!pendingIds.has(name)) pendingIds.set(name, []);
           pendingIds.get(name).push(tc.id);
         }
-        const ev = assistantEvent({ reply, usage, model: modelName(), sessionId, messageId: `msg_flint_${turnNo}_${apiCalls}` });
+        const ev = assistantEvent({ reply, usage, model: info?.model || modelName(), sessionId, messageId: `msg_flint_${turnNo}_${apiCalls}` });
         if (ev) write(ev);
+      },
+      onModelFallback(info) {
+        write(modelFallbackEvent({ ...info, sessionId }));
       },
       onToolStart(name, args, info) {
         const id = callId(name, info?.id, { unstarted: true });
@@ -219,6 +222,7 @@ export function createStdioSession({ write, run, sessionId, model, onIdleEnd, on
         stopReason: turn.interrupted ? "interrupted" : (res?.stop_reason || "done"),
         truncatedAt: res?.truncated_at || null,
         providerError: turn.interrupted ? null : res?.providerError,
+        fallback: res?.fallback || null,
       });
     } catch (err) {
       const interrupted = turn.interrupted || err?.name === "AbortError";

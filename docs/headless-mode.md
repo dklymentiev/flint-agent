@@ -27,8 +27,8 @@ flint --headless --task "<task description>" [options]
 | Code | Meaning |
 |------|---------|
 | `0` | The task ran to its own end (`stop_reason` `"done"`). |
-| `1` | An error occurred (startup failure, unhandled exception). No record is written. |
-| `2` | The run was stopped before its end and the record was still written: the `--time-limit` passed (`"time"`), or the process received SIGTERM or SIGINT (`"killed"`). Also: the launch could not be read, that is an instructions file (`--system-prompt-file`, `--append-system-prompt-file`, a `CLAUDE.md`) that cannot be opened, or a `.mcp.json` in `--cwd` that is not valid JSON. The two are told apart by stdout: a launch that could not be read writes one `[flint] ...` line to stderr and no result JSON, the same as the stdio mode does. |
+| `1` | The turn did not get anywhere and says why in the record (`stop_reason` `"empty"`, `"stall"`, `"error"`, `"auth"`, `"quota"`, `"rate-limit"`, `"model-not-found"`, `"text-tool-call"`, `"denied"`). Also a startup failure or an unhandled exception, and then no record is written. |
+| `2` | The run was stopped before its end and the record was still written: the `--time-limit` passed (`"time"`), the process received SIGTERM or SIGINT (`"killed"`), or a cost or step ceiling cut the turn (`"budget"`). Also: the launch could not be read, that is an instructions file (`--system-prompt-file`, `--append-system-prompt-file`, a `CLAUDE.md`) that cannot be opened, or a `.mcp.json` in `--cwd` that is not valid JSON. The two are told apart by stdout: a launch that could not be read writes one `[flint] ...` line to stderr and no result JSON, the same as the stdio mode does. |
 
 One rule for a caller such as CI: `0` means the task finished, anything else
 means it did not. A run that was killed half way used to exit `0`.
@@ -48,12 +48,13 @@ distinguishes how the run ended.
 | `tokens` | `number` | Prompt + completion tokens of this run. Equal to `tokens_obj.prompt + tokens_obj.completion`. |
 | `repoClaimGap` | `boolean` | Whether the agent claimed to have done work but the repo had no changes (auto-verified via `git status`). |
 | `model` | `string` | The model string in use, e.g. `"gpt-4o"` or `"fake-model"`. |
-| `stop_reason` | `string` | How the run ended. One of: `"done"`, `"time"`, `"killed"`. |
+| `stop_reason` | `string` | How the run ended: `"done"`, a stop from outside (`"time"`, `"killed"`), or the way the turn itself ended short of the task (see the table below). |
 | `duration_ms` | `number` | Wall-clock duration of the headless run in milliseconds, measured from before the first agent step to result emission. |
 | `tool_calls` | `number` | Number of tool calls the agent attempted in this run (including ones that were denied, and the ones of a turn that was interrupted). |
 | `denied_calls` | `number` | Number of tool calls in this run that were denied by the permission/security guard. |
 | `modified_files` | `string[]` | `git status --porcelain` lines after the run, from the folder the agent worked in: `--cwd`, or without it the folder Flint was started from. Empty array if git is unavailable or the folder is not a repo. |
 | `tokens_obj` | `object` | Breakdown of token usage (see below). |
+| `fallback` | `object\|null` | `{ "from", "to", "reason" }` when the turn left the model in `model` for the fallback one (`FLINT_FALLBACK_MODEL`), whether or not the fallback then answered; `null` when it stayed. `reason` is `"stall"`, `"empty"`, `"error"`, `"rate-limit"` or `"model-not-found"`. Written when the turn ended by itself, not on `"time"` or `"killed"`. |
 
 ### `tokens_obj`
 
@@ -70,6 +71,17 @@ distinguishes how the run ended.
 | `"done"` | Normal completion — the agent finished the task and produced a final response. | `0` |
 | `"time"` | The `--time-limit` passed. If the last turn had already produced its answer, `response` carries it. | `2` |
 | `"killed"` | `SIGTERM` or `SIGINT` was received, at any point after startup. Before the first turn, no turn is started. The session is saved first. | `2` |
+| `"budget"` | A cost or step ceiling cut the turn. | `2` |
+| `"empty"` | The model answered with nothing, three times in a row. | `1` |
+| `"stall"` | The provider sent no sign of an answer, three times in a row. | `1` |
+| `"error"` | The model call failed and the retries did not help. | `1` |
+| `"auth"`, `"quota"`, `"rate-limit"` | The provider refused the key, the account is out of credit, or the limit did not lift. | `1` |
+| `"model-not-found"` | The provider does not serve this model. | `1` |
+| `"text-tool-call"` | The model wrote its tool call as text; nothing ran. | `1` |
+| `"denied"` | A command was refused until the turn gave up. | `1` |
+
+For every value but `"done"`, `response` holds the sentence that says what happened. Until
+1.14.11 all of the rows with exit code `1` were recorded as `"done"` with exit code `0`.
 
 ### Example
 

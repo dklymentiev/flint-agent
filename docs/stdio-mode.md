@@ -85,10 +85,13 @@ that the `claude` stream-json format does not have:
 | `{"type":"tool_start","tool_use_id","tool_name","args","session_id"}` | A tool begins. `tool_use_id` is the id of its `tool_use` block and of its later `tool_result`. |
 | `{"type":"text","text","session_id"}` | One chunk of the reply as the model streams it, thinking left out. The same text comes again, whole, in the `assistant` line that follows. |
 | `{"type":"steer_applied","request_id","source":"host","applied_to":"running_turn" or "new_turn","text","session_id"}` | A `control_request` with subtype `steer` was taken by the running turn or started a turn of its own. |
+| `{"type":"model_fallback","from","to","reason","message","session_id"}` | The turn's model became unavailable and the rest of the turn runs on the fallback model (`FLINT_FALLBACK_MODEL`). The `assistant` lines after it carry that model in `message.model`. |
 
 Added fields: the tool result line carries `tool_name`, `args` and
 `duration_ms` (milliseconds from that call's own start) beside `message`; the
-`result` line carries `stop_reason`, `truncated_at` and `provider_error`.
+`result` line carries `stop_reason`, `truncated_at`, `provider_error` and
+`fallback` (`{ "from", "to", "reason" }` when the turn left its model for the
+fallback one, else `null`).
 
 A host has to skip a line whose `type` it does not know and ignore fields it
 does not know. One that rejects unknown types cannot read Flint as it is:

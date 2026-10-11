@@ -1,7 +1,7 @@
 // Agent loop — callback-based, no React/store dependency
 // Called by processMessage in index.js which binds callbacks to store actions
 
-import { chatCompletion } from "../api/client.js";
+import { chatCompletion, fetchModelInfo } from "../api/client.js";
 import { getDefinitions } from "../tools/registry.js";
 import { classifyIntent, filterToolsByManifest, formatIntentHint } from "./intent.js";
 import { decideToolScope } from "./tool-guard.js";
@@ -368,6 +368,7 @@ export async function runAgent(messages, callbacks = {}, { sessionId, signal, se
     onScopeNote, // (text) => tool narrowing was applied — say so on screen
     onActivity, // ({kind, label, attempt}) => what is happening right now
     onProgress, // ({kind, chars}) => characters of reasoning or of a tool call so far, this call
+    onModelFallback, // ({from, to, reason, text}) => the turn carries on with the fallback model
   } = callbacks;
 
   // What this session has already done, read BEFORE anything is appended for
@@ -559,7 +560,7 @@ export async function runAgent(messages, callbacks = {}, { sessionId, signal, se
     fallback: intentManifest.fallback,
     model: config.model,
   });
-  const shouldStripReasoning = isNativeReasoningModel(config.model);
+  let shouldStripReasoning = isNativeReasoningModel(config.model);
   const stats = {
     promptTokens: 0,
     completionTokens: 0,
@@ -649,6 +650,48 @@ export async function runAgent(messages, callbacks = {}, { sessionId, signal, se
   // repoClaimGap: true when executing tools ran but the git repo was clean
   // at finish — i.e. the turn's answer claims changes that left no trace.
   // The footer and API response attach the same flag.
+  // The optional fallback model (config.fallbackModel). Null until the model
+  // this turn started on proved unavailable; then { from, to, reason } to the
+  // end of the turn. It lives in the turn on purpose: the next turn starts on
+  // the main model again, so a main model that recovered is used.
+  let fallback = null;
+  // The fallback's own rate card, null when the provider does not list one.
+  // Its calls must not be priced by the main model's card.
+  let fallbackPricing = null;
+  const FALLBACK_REASON_TEXT = {
+    stall: "the provider sent no answer",
+    empty: "it answered with nothing",
+    error: "the calls to the provider failed",
+    "model-not-found": "the provider does not serve it",
+    "rate-limit": "the provider kept refusing it for now",
+  };
+  /**
+   * The retries on the current model are used up. Carry on with the fallback
+   * model if the operator named one, and say so. False when there is none, or
+   * when the model that just failed IS the fallback: one fallback, not a chain.
+   */
+  const switchToFallback = async (reason) => {
+    const to = config.fallbackModel;
+    const from = modeModel || config.model;
+    if (!to || fallback || to === from) return false;
+    fallback = { from, to, reason };
+    try { fallbackPricing = await fetchModelInfo(to); } catch { fallbackPricing = null; }
+    shouldStripReasoning = isNativeReasoningModel(to);
+    // The fallback gets its own full set of attempts.
+    stallAttempts = 0;
+    consecutiveApiErrors = 0;
+    consecutiveEmptyResponses = 0;
+    consecutiveTempErrors = 0;
+    const text = `Model ${from} is unavailable (${FALLBACK_REASON_TEXT[reason] || reason}). This turn carries on with the fallback model ${to}.`;
+    agentLog.warn("model-fallback", { from, to, reason, apiCallCount });
+    onModelFallback?.({ from, to, reason, text });
+    return true;
+  };
+  /** A stop after the fallback was tried names both models. */
+  const withFallbackNote = (msg) => fallback
+    ? `${msg}
+[The main model ${fallback.from} was unavailable (${FALLBACK_REASON_TEXT[fallback.reason] || fallback.reason}), and the fallback model ${fallback.to} failed as well.]`
+    : msg;
   const finish = (r) => {
     const filesChanged = toolCallsThisTurn > 0 ? (changeTracker.changes()?.files ?? null) : [];
     // Git check is done once per turn, after the disk snapshot, and only when a
@@ -666,6 +709,7 @@ export async function runAgent(messages, callbacks = {}, { sessionId, signal, se
       : null;
     return {
       ...r,
+      fallback,
       filesChanged,
       repoClean,
       repoClaimGap: repoClaimGap({ toolCallsThisTurn: repoMutatingCallsThisTurn, filesChanged, repoClean }),
@@ -952,7 +996,7 @@ export async function runAgent(messages, callbacks = {}, { sessionId, signal, se
             payload,
             tools,
             onTok,
-            { signal: stallSignal, model: modeModel, onProgress: onProg },
+            { signal: stallSignal, model: fallback ? fallback.to : modeModel, onProgress: onProg, ...(fallback ? { pricing: fallbackPricing } : {}) },
           ),
           {
             timeoutMs: watchdogTimeout,
@@ -1003,7 +1047,8 @@ export async function runAgent(messages, callbacks = {}, { sessionId, signal, se
         stallAttempts++;
         agentLog.warn("stall", { attempt: stallAttempts, max: stallAttemptsMax, apiCallCount, timeoutMs: firstTokenTimeoutMs() });
         if (stallAttempts >= stallAttemptsMax) {
-          const msg = stallStopNote(stallAttempts, firstTokenTimeoutMs());
+          if (await switchToFallback("stall")) continue;
+          const msg = withFallbackNote(stallStopNote(stallAttempts, firstTokenTimeoutMs()));
           messages.push({ role: "assistant", content: msg });
           onToken?.(msg);
           onStreamEnd?.();
@@ -1045,7 +1090,7 @@ export async function runAgent(messages, callbacks = {}, { sessionId, signal, se
           : err.isAuthError
           ? " Run /key to update the API key."
           : " Top up credits with the provider, or switch to a different provider.";
-        const msg = `[${kind.toUpperCase()}] ${err.message}${hint}`;
+        let msg = `[${kind.toUpperCase()}] ${err.message}${hint}`;
         if (retriable && consecutiveTempErrors < tempLimit) {
           consecutiveTempErrors++;
           const waitMs = err.retryAfter
@@ -1061,6 +1106,12 @@ export async function runAgent(messages, callbacks = {}, { sessionId, signal, se
           });
           if (!waited) throw Object.assign(new Error("Aborted"), { name: "AbortError" });
           continue;
+        }
+        // Waited out and still refused: that is unavailable. A bad key or an
+        // empty account is not, the fallback would meet the same refusal.
+        if (retriable) {
+          if (await switchToFallback(kind)) continue;
+          msg = withFallbackNote(msg);
         }
         agentLog.error("API non-retriable error", { kind, status: err.statusCode, apiCallCount, attempts: consecutiveTempErrors });
         messages.push({ role: "assistant", content: msg });
@@ -1081,11 +1132,13 @@ export async function runAgent(messages, callbacks = {}, { sessionId, signal, se
       // to a text-only model: that is the image refusal handled just below, not
       // a missing model, so it must not end the turn here.
       if (err.isModelNotFound && !isImageRefusal(err)) {
+        if (await switchToFallback("model-not-found")) continue;
         agentLog.error("API model not found", { status: err.statusCode, apiCallCount });
-        messages.push({ role: "assistant", content: err.message });
-        onToken?.(err.message);
+        const msg = withFallbackNote(err.message);
+        messages.push({ role: "assistant", content: msg });
+        onToken?.(msg);
         onStreamEnd?.();
-        return finish({ text: err.message, stats, stop_reason: "model-not-found", providerError: { status: 404, kind: "model-not-found" } });
+        return finish({ text: msg, stats, stop_reason: "model-not-found", providerError: { status: 404, kind: "model-not-found" } });
       }
 
       // The provider refused an image: this model cannot see. That is a fact
@@ -1106,11 +1159,12 @@ export async function runAgent(messages, callbacks = {}, { sessionId, signal, se
       const cause = err.cause ? { code: err.cause.code, message: err.cause.message, name: err.cause.name } : undefined;
       agentLog.error("API call failed", { attempt: consecutiveApiErrors, error: err.message, cause, apiCallCount });
       if (consecutiveApiErrors >= 3) {
+        if (await switchToFallback("error")) continue;
         // "fetch failed" alone does not say the server is not there. The cause
         // (ECONNREFUSED, ENOTFOUND, a timeout) and where we tried say it.
         const why = cause?.code || cause?.message;
-        const where = why && config.provider ? ` (provider ${config.provider}, model ${config.model})` : "";
-        const msg = `API error (${consecutiveApiErrors}x): ${err.message}${why ? ` [${why}]` : ""}${where}`;
+        const where = why && config.provider ? ` (provider ${config.provider}, model ${fallback ? fallback.to : modeModel || config.model})` : "";
+        const msg = withFallbackNote(`API error (${consecutiveApiErrors}x): ${err.message}${why ? ` [${why}]` : ""}${where}`);
         messages.push({ role: "assistant", content: msg });
         onToken?.(msg);
         onStreamEnd?.();
@@ -1138,7 +1192,7 @@ export async function runAgent(messages, callbacks = {}, { sessionId, signal, se
       completionTokens: usage?.completion_tokens,
     });
 
-    onApiResponse?.(apiCallCount, reply, usage);
+    onApiResponse?.(apiCallCount, reply, usage, { model: fallback ? fallback.to : modeModel || config.model });
 
     // Strip native reasoning tokens (o1, o3, Gemini-3-thinking, DeepSeek-R1)
     if (shouldStripReasoning) {
@@ -1267,18 +1321,20 @@ export async function runAgent(messages, callbacks = {}, { sessionId, signal, se
           if (!waited) throw Object.assign(new Error("Aborted"), { name: "AbortError" });
           continue;
         }
+        if (await switchToFallback("empty")) continue;
         // After the limit the turn stops, and says so. It used to
         // return the last old answer as "done", so the operator saw a stale
         // line and a prompt and could not tell the model had gone silent
         // (2026-09-29: 17 empty, billed responses in one session).
         agentLog.error("giving up after repeated empty responses", { apiCallCount, stats });
         if (apiCallCount > 1) {
-          const msg = `Stopped: the model returned ${consecutiveEmptyResponses} empty responses in a row (each one is billed), ` +
+          let msg = `Stopped: the model returned ${consecutiveEmptyResponses} empty responses in a row (each one is billed), ` +
             `and Flint waited and retried each time. ` +
             // Not "/continue": that command resumes /auto plans only and
             // answered "No active plan" to the owner on 2026-09-29.
             `The work may be unfinished. To continue, type: continue. ` +
             `if it keeps happening, switch the model with /model.`;
+          msg = withFallbackNote(msg);
           messages.push({ role: "assistant", content: msg });
           onToken?.(msg);
           onStreamEnd?.();

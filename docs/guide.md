@@ -108,6 +108,16 @@ Sessions are saved as you go and keep messages, input history, profile, model, p
 | `/model test [free \| <id> ...]` | Run six small checked agent tasks on a model in the background and save the score ([model-check.md](model-check.md)) |
 | `/profile <name>` | Switch agent profile |
 
+**Fallback model.** Set `FLINT_FALLBACK_MODEL` to a second model on the same
+provider, and a turn whose model becomes unavailable carries on with it. The
+retries on the main model come first: no answer from the provider, empty
+answers, failed calls, a rate limit that does not lift, or a model the
+provider does not serve. Then one line names both models and the rest of the
+turn runs on the fallback. The next turn starts on the main model again. If
+the fallback fails as well, the turn stops and names both. A refused key, an
+empty account, a budget ceiling or a denied command never switch the model.
+Not set, there is no fallback, and such a turn stops and says why.
+
 Profiles (`profiles/profiles.json`):
 
 | Profile | Description | Context mode |
@@ -524,6 +534,7 @@ Set in the environment or in `.env` in Flint's folder. Selected variables:
 | `FLINT_PROVIDER` | `openrouter` | Provider (else the last one chosen) |
 | `OPENROUTER_MODEL` | provider default | Model ID, for any provider |
 | `OPENROUTER_PROVIDER_ONLY`, `_IGNORE`, `_ORDER`, `_SORT` | none | OpenRouter host routing for the main model |
+| `FLINT_FALLBACK_MODEL` | none | A second model the turn carries on with when the main one is unavailable. Unset: no fallback |
 | `INTENT_MODEL` | none | Classifier model that picks the tools per turn. Unset: the classifier is off |
 | `FLINT_SPEND` | none | Spend level, overrides `/spend` |
 | `FLINT_SWAP` | on | `0` turns context swap off |

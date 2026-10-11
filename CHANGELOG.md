@@ -9,6 +9,32 @@ headings to show what changed between your version and the newest one.
 
 ## [Unreleased]
 
+## [1.14.11] - 2026-10-11
+
+### Added
+- A fallback model. Name a second model in `FLINT_FALLBACK_MODEL` and a turn
+  whose model becomes unavailable carries on with it instead of stopping.
+  Unavailable means the retries are used up: the provider sent no answer, the
+  model answered with nothing, the calls failed, a rate limit did not lift, or
+  the provider does not serve the model. A refused key, an empty account, a
+  budget ceiling and a denied command never switch the model. The switch is
+  said on screen with both names, it holds to the end of that turn, and the
+  next turn starts on the main model again. If the fallback fails too, the
+  turn stops and names both. Its calls are priced by its own rate card. The
+  headless record, the stdio `result` line and the API reply carry
+  `fallback` (`{ from, to, reason }` or `null`), and stdio writes a
+  `model_fallback` line at the switch. Not set, nothing changes: there is no
+  default and no hidden substitution.
+
+### Fixed
+- A headless run reported success for a turn that had failed. When the model
+  answered with nothing three times, went silent, was refused by the provider
+  or was not found, the turn stopped and said so, but the result record still
+  read `stop_reason: "done"` and the process exited 0. A script or a CI step
+  took it for a finished task. The record now carries the reason the turn
+  ended with, and the exit code is 0 only for `"done"`: 1 when the turn did
+  not get anywhere, 2 when a ceiling cut it. See docs/headless-mode.md.
+
 ## [1.14.10] - 2026-10-11
 
 ### Fixed

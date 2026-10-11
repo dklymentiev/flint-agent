@@ -17,8 +17,10 @@
 //   text_delta            delta: visible prose before the assistant snapshot
 //   steer_status          request_id, status "delivered" | "too_late" (after the
 //                         control_response that said "accepted")
+//   model_fallback        from, to, reason: the main model was unavailable and
+//                         the rest of the turn runs on the fallback model
 //   on the tool_result line, beside `message`: tool_name, args, duration_ms
-//   on the result line: truncated_at, provider_error
+//   on the result line: truncated_at, provider_error, fallback
 //
 // So a host has to skip a line whose `type` it does not know and ignore fields
 // it does not know; one that rejects them cannot read Flint as it is. The node
@@ -151,7 +153,7 @@ export function toolResultEvent({ toolUseId, result, isError, sessionId, toolNam
  * The end of a turn. `subtype` is "success", "error_during_execution" (the
  * turn failed or was interrupted) or "error_max_turns" (the step limit).
  */
-export function resultEvent({ subtype, text, sessionId, durationMs, numTurns, costUsd, promptTokens, completionTokens, stopReason, truncatedAt, providerError }) {
+export function resultEvent({ subtype, text, sessionId, durationMs, numTurns, costUsd, promptTokens, completionTokens, stopReason, truncatedAt, providerError, fallback }) {
   return {
     type: "result",
     subtype,
@@ -171,7 +173,18 @@ export function resultEvent({ subtype, text, sessionId, durationMs, numTurns, co
     // "model-not-found" or "auth"), else null. Structured, so a host never has
     // to read it out of the text or the stderr.
     provider_error: providerError || null,
+    // { from, to, reason } when the turn left its model for the fallback one,
+    // whether or not the fallback then answered; else null.
+    fallback: fallback || null,
   };
+}
+
+/**
+ * The model this turn started on is unavailable and the turn carries on with
+ * the fallback model. The `assistant` lines that follow name that model.
+ */
+export function modelFallbackEvent({ from, to, reason, text, sessionId }) {
+  return { type: "model_fallback", from, to, reason, message: text || "", session_id: sessionId };
 }
 
 /**

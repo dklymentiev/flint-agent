@@ -320,6 +320,10 @@ export const config = {
   // anthropic/claude-sonnet-4.6 4/4 2.5-3s $3/M
   // qwen/qwen3.5-flash-02-23 4/4 4-15s $0.07/M cheapest, slow
   intentModel: (process.env.INTENT_MODEL || "").trim() || null,
+  // A second model for when the main one is unavailable, from
+  // FLINT_FALLBACK_MODEL. Optional, and there is no default: not set means a
+  // turn whose model stops answering stops and says so (agent/agent.js).
+  fallbackModel: (process.env.FLINT_FALLBACK_MODEL || "").trim() || null,
 };
 
 // Log config at boot (logger imports dotenv too, so it's ready)

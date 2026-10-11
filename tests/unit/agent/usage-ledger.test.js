@@ -8,8 +8,8 @@
 // session total looked fine because nothing was missing from it that anyone
 // could see.
 
-import { describe, it, expect, beforeEach } from "vitest";
-import { USAGE_SOURCES, recordUsage, drainUsage, resetSessionSpend } from "../../../src/agent/usage.js";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { USAGE_SOURCES, recordUsage, drainUsage, resetSessionSpend, setPricingSource } from "../../../src/agent/usage.js";
 
 const usage = { prompt_tokens: 100, completion_tokens: 20, cost: 0.0005 };
 
@@ -49,5 +49,40 @@ describe("the ledger", () => {
   it("does not invent a row for a source nobody declared", () => {
     expect(recordUsage("nonesuch", usage)).toBe(null);
     expect(drainUsage().nonesuch).toBeUndefined();
+  });
+});
+
+// A call is priced by the card of the model that made it. The ledger knew one
+// card, the main model's, so a turn that carried on with the fallback model
+// would have been billed at the main model's rate whenever the provider sent
+// no cost of its own.
+describe("the rate card of a call that is not on the main model", () => {
+  const bare = { prompt_tokens: 1000, completion_tokens: 100 };
+  const mainCard = { prompt: 0.001, completion: 0.002 };
+
+  beforeEach(() => { setPricingSource(() => mainCard); });
+  afterEach(() => { setPricingSource(null); });
+
+  it("is its own when the caller gives one", () => {
+    const entry = recordUsage("agent", bare, { prompt: 0.00001, completion: 0.00002 });
+    expect(entry.cost).toBeCloseTo(1000 * 0.00001 + 100 * 0.00002, 10);
+    expect(entry.estimated).toBe(true);
+  });
+
+  it("is unknown, not the main model's, when the caller says so: cost 0, flagged", () => {
+    const entry = recordUsage("agent", bare, null);
+    expect(entry.cost).toBe(0);
+    expect(entry.estimated).toBe(true);
+  });
+
+  it("is the main model's when the caller says nothing", () => {
+    const entry = recordUsage("agent", bare);
+    expect(entry.cost).toBeCloseTo(1000 * 0.001 + 100 * 0.002, 10);
+  });
+
+  it("gives way to the provider's own figure", () => {
+    const entry = recordUsage("agent", { ...bare, cost: 0.5 }, null);
+    expect(entry.cost).toBe(0.5);
+    expect(entry.estimated).toBe(false);
   });
 });
