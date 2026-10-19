@@ -22,12 +22,26 @@ function loadProviders() {
           if (id.startsWith("_")) continue; // skip comments
           providers[id] = { id, headers: {}, ...def };
         }
-        return providers;
+        return applyBaseUrl(providers);
       }
     } catch {}
   }
   // Should not happen — config/providers.json is bundled
   return {};
+}
+
+/**
+ * FLINT_BASE_URL sends the provider FLINT_PROVIDER names (OpenRouter when
+ * unset) to another address that speaks the same API: a gateway that holds
+ * the real key and passes the calls on, for one. The key Flint sends is then
+ * whatever that address expects. Every call to the provider, the model list
+ * and prices included, follows the address, so nothing goes around it.
+ */
+export function applyBaseUrl(providers, env = process.env) {
+  const base = (env.FLINT_BASE_URL || "").trim().replace(/\/+$/, "");
+  const target = providers[env.FLINT_PROVIDER || "openrouter"];
+  if (base && target) target.baseUrl = base;
+  return providers;
 }
 
 export const PROVIDERS = loadProviders();
