@@ -18,6 +18,10 @@ export function buildHeaders(provider, apiKey) {
 // somewhere because there is one door now.
 export function buildBody(messages, model, tools, maxTokens, stream, extra = {}) {
   const body = { model, messages, stream };
+  // A stream says what it cost only when asked. OpenRouter sends the usage
+  // anyway; OpenAI, NVIDIA and others send none, and then the cost guard and
+  // whatever meters the calls on the way (a gateway) see zero tokens.
+  if (stream) body.stream_options = { include_usage: true };
   if (maxTokens) body.max_tokens = maxTokens;
   if (tools?.length) body.tools = tools;
   if (extra.temperature != null) body.temperature = extra.temperature;

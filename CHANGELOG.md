@@ -9,6 +9,13 @@ headings to show what changed between your version and the newest one.
 
 ## [Unreleased]
 
+### Fixed
+- A streamed answer reports its usage with every OpenAI-format provider.
+  Flint did not ask for it (`stream_options.include_usage`), and only
+  OpenRouter sends it unasked: on OpenAI, NVIDIA and others a turn counted
+  zero tokens, so the cost guard saw nothing and a gateway metering the calls
+  recorded none.
+
 ### Added
 - `FLINT_BASE_URL` sends the provider `FLINT_PROVIDER` names (OpenRouter when
   unset) to another address with the same API, such as a gateway that holds
