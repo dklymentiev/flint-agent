@@ -344,12 +344,14 @@ export function createSystemTools(store) {
       if (config.provider !== "openrouter") {
         return `Balance check is only available for OpenRouter. Current provider: ${config.provider}`;
       }
+      const { getProvider } = await import("../providers/registry.js");
+      const openrouterBase = getProvider("openrouter")?.baseUrl || "https://openrouter.ai/api/v1";
       try {
         const [creditsRes, keyRes] = await Promise.all([
-          fetch("https://openrouter.ai/api/v1/credits", {
+          fetch(`${openrouterBase}/credits`, {
             headers: { Authorization: `Bearer ${config.apiKey}` },
           }),
-          fetch("https://openrouter.ai/api/v1/auth/key", {
+          fetch(`${openrouterBase}/auth/key`, {
             headers: { Authorization: `Bearer ${config.apiKey}` },
           }),
         ]);

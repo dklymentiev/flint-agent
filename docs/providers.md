@@ -78,6 +78,10 @@ Resolution order for the model:
 3. Last-used model for the provider
 4. The provider's `defaultModel`
 
+### Another address for the provider
+
+`FLINT_BASE_URL` replaces the `baseUrl` of the provider `FLINT_PROVIDER` names (OpenRouter when unset), for an address that speaks the same API: a gateway that holds the provider key and passes the calls on, for one. The key Flint sends goes to that address, so it is whatever the address expects. The model list, prices, the free list and the balance check follow the address too. A child agent inherits the variable.
+
 ### OpenRouter routing
 
 `OPENROUTER_PROVIDER_ONLY`, `OPENROUTER_PROVIDER_IGNORE` and `OPENROUTER_PROVIDER_ORDER` (comma lists of host slugs) and `OPENROUTER_PROVIDER_SORT` (`price`, `throughput` or `latency`) pin which OpenRouter hosts serve the main model. Unset, OpenRouter picks.

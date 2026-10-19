@@ -10,8 +10,11 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { homeStateDir } from "./data-dir.js";
+import { getProvider } from "./providers/registry.js";
 
 export const OPENROUTER_API = "https://openrouter.ai/api/v1";
+// FLINT_BASE_URL moves OpenRouter (providers/registry.js); the free list goes there too.
+const openrouterApi = () => getProvider("openrouter")?.baseUrl || OPENROUTER_API;
 const AVAILABLE_UPTIME = 90;
 
 const vendorOf = (id) => String(id).split("/")[0];
@@ -184,18 +187,18 @@ async function defaultFetchJson(url) {
 
 /** The free models, ranked, each with its stats, and the account's daily limit. */
 export async function loadFreeModels({ fetchJson = fetchJsonOverride || defaultFetchJson } = {}) {
-  const catalog = (await fetchJson(`${OPENROUTER_API}/models`))?.data || [];
+  const catalog = (await fetchJson(`${openrouterApi()}/models`))?.data || [];
   const candidates = freeCandidates(catalog);
   const withStats = await Promise.all(candidates.map(async (m) => {
     try {
-      const eps = (await fetchJson(`${OPENROUTER_API}/models/${m.id}/endpoints`))?.data?.endpoints;
+      const eps = (await fetchJson(`${openrouterApi()}/models/${m.id}/endpoints`))?.data?.endpoints;
       return { ...m, ...endpointStats(eps) };
     } catch {
       return { ...m, ...endpointStats([]) };
     }
   }));
   let key = null;
-  try { key = (await fetchJson(`${OPENROUTER_API}/key`))?.data || null; } catch {}
+  try { key = (await fetchJson(`${openrouterApi()}/key`))?.data || null; } catch {}
   const { withScores } = await import("./model-check.js");
   return { models: rankFree(withScores(withStats)), limit: dailyFreeLimit(key), freeTier: key ? key.is_free_tier !== false : null };
 }

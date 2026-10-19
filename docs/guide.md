@@ -532,6 +532,7 @@ Set in the environment or in `.env` in Flint's folder. Selected variables:
 |----------|---------|-------------|
 | `OPENROUTER_API_KEY`, `OPENAI_API_KEY`, `ANTHROPIC_API_KEY` | none | Provider keys, moved into the encrypted store at start |
 | `FLINT_PROVIDER` | `openrouter` | Provider (else the last one chosen) |
+| `FLINT_BASE_URL` | none | Another address for the provider `FLINT_PROVIDER` names, with the same API (a gateway that holds the key). Model list and prices go there too |
 | `OPENROUTER_MODEL` | provider default | Model ID, for any provider |
 | `OPENROUTER_PROVIDER_ONLY`, `_IGNORE`, `_ORDER`, `_SORT` | none | OpenRouter host routing for the main model |
 | `FLINT_FALLBACK_MODEL` | none | A second model the turn carries on with when the main one is unavailable. Unset: no fallback |

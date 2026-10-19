@@ -288,7 +288,7 @@ export async function fetchModelInfo(modelId) {
   // Fallback: try OpenRouter directly (backward compat)
   if (providerId === "openrouter") {
     try {
-      const res = await fetch("https://openrouter.ai/api/v1/models", {
+      const res = await fetch(`${getProvider("openrouter")?.baseUrl || "https://openrouter.ai/api/v1"}/models`, {
         headers: { Authorization: `Bearer ${config.apiKey}` },
       });
       if (!res.ok) return null;

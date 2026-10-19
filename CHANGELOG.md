@@ -9,6 +9,13 @@ headings to show what changed between your version and the newest one.
 
 ## [Unreleased]
 
+### Added
+- `FLINT_BASE_URL` sends the provider `FLINT_PROVIDER` names (OpenRouter when
+  unset) to another address with the same API, such as a gateway that holds
+  the real key and passes the calls on. The key Flint sends is then whatever
+  that address expects. The model list, prices, the free list and the balance
+  check go to the same address, so no call goes around it.
+
 ## [1.14.11] - 2026-10-11
 
 ### Added
