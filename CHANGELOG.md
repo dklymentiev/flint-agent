@@ -9,19 +9,46 @@ headings to show what changed between your version and the newest one.
 
 ## [Unreleased]
 
-### Fixed
-- A streamed answer reports its usage with every OpenAI-format provider.
-  Flint did not ask for it (`stream_options.include_usage`), and only
-  OpenRouter sends it unasked: on OpenAI, NVIDIA and others a turn counted
-  zero tokens, so the cost guard saw nothing and a gateway metering the calls
-  recorded none.
+## [1.15.0] - 2026-10-19
 
 ### Added
+- More providers in the list by default: Cerebras, Mistral, DeepInfra,
+  Fireworks, Hugging Face, SambaNova, Novita and Nebius (all OpenAI format).
+  Picking one that has no key asks for the key right there, in the secret
+  input, and then lists its models; `/provider <id>` asks the same way.
+- NVIDIA (build.nvidia.com) as a provider: `/key nvidia`, then
+  `/provider nvidia`. OpenAI format, the model list from NVIDIA's `/models`,
+  default model `z-ai/glm-5.3`.
 - `FLINT_BASE_URL` sends the provider `FLINT_PROVIDER` names (OpenRouter when
   unset) to another address with the same API, such as a gateway that holds
   the real key and passes the calls on. The key Flint sends is then whatever
   that address expects. The model list, prices, the free list and the balance
   check go to the same address, so no call goes around it.
+
+### Changed
+- The status row names the provider before the model
+  (`openrouter · stealth/space-bunny-alpha`).
+- The `/model` and `/provider` lists show up to 15 choices at once instead of
+  4, as far as the window is tall enough.
+- The OpenRouter model list says what each model can do: Tools (calls
+  tools or not) and Can (`img` reads images, `think` reasons, `json` answers to
+  a schema). The line under the list gives the marked model's speed now
+  (tokens a second, time to the first token, uptime, from OpenRouter, asked
+  when the marker stops on it) and the start of its description.
+- `/model` with no argument opens the model list of the provider in use, the
+  marker on the current model, below what it says about that model.
+- Typing in an open `/model`, `/provider` or `/resume` list narrows it: every
+  word typed must be in the name (`glm 5`). Backspace edits, Esc clears the
+  search, a second Esc goes back.
+
+### Fixed
+- After Ctrl+S sorted the model list, Enter took the model at that position
+  in the unsorted list, not the one the marker was on.
+- A streamed answer reports its usage with every OpenAI-format provider.
+  Flint did not ask for it (`stream_options.include_usage`), and only
+  OpenRouter sends it unasked: on OpenAI, NVIDIA and others a turn counted
+  zero tokens, so the cost guard saw nothing and a gateway metering the calls
+  recorded none.
 
 ## [1.14.11] - 2026-10-11
 

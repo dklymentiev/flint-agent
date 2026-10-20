@@ -24,7 +24,7 @@ flint --profile desktop --model google/gemini-2.5-flash --port 3000 --provider o
 |------|-------------|
 | `--port` | HTTP server port (default 3000). Without the flag, a busy port makes Flint try the next one; with it, Flint fails instead |
 | `--model` | Model ID (default: the last model used with the provider, else the provider's default) |
-| `--provider` | LLM provider: openrouter, openai, anthropic, groq, together, ollama, gemini |
+| `--provider` | LLM provider: openrouter, openai, anthropic, groq, together, nvidia, cerebras, mistral, deepinfra, fireworks, huggingface, sambanova, novita, nebius, ollama, gemini |
 | `--profile` | Agent profile to load at startup |
 | `--new` | Start a new session (the default) |
 | `--last` | Continue the most recent session |
@@ -69,7 +69,7 @@ The console has no tabs. History is ordinary terminal scrollback: each line is w
 | **y / n / a** | Answer an approval: yes, no, always. Esc means no |
 | **s** | On an approval for an MCP tool: always, for every tool of that server |
 
-In the `/provider` pick list: Up/Down, Enter, Esc to go back, Ctrl+S to change the sort order.
+In the `/provider` and `/model` pick lists: Up/Down, Enter, Esc to go back, Ctrl+S to change the sort order. Type to search: every word typed must be in the name (`glm 5`); Backspace edits, Esc clears the search first.
 
 ---
 

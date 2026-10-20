@@ -63,6 +63,87 @@
     "defaultModel": "llama3.2",
     "ollamaCompat": true
   },
+  "nvidia": {
+    "name": "NVIDIA",
+    "format": "openai",
+    "baseUrl": "https://integrate.api.nvidia.com/v1",
+    "authType": "bearer",
+    "modelsEndpoint": "/models",
+    "keyRequired": true,
+    "defaultModel": "z-ai/glm-5.3"
+  },
+  "cerebras": {
+    "name": "Cerebras",
+    "format": "openai",
+    "baseUrl": "https://api.cerebras.ai/v1",
+    "authType": "bearer",
+    "modelsEndpoint": "/models",
+    "keyRequired": true,
+    "defaultModel": "gpt-oss-120b"
+  },
+  "mistral": {
+    "name": "Mistral",
+    "format": "openai",
+    "baseUrl": "https://api.mistral.ai/v1",
+    "authType": "bearer",
+    "modelsEndpoint": "/models",
+    "keyRequired": true,
+    "defaultModel": "mistral-small-latest"
+  },
+  "deepinfra": {
+    "name": "DeepInfra",
+    "format": "openai",
+    "baseUrl": "https://api.deepinfra.com/v1/openai",
+    "authType": "bearer",
+    "modelsEndpoint": "/models",
+    "keyRequired": true,
+    "defaultModel": "openai/gpt-oss-120b"
+  },
+  "fireworks": {
+    "name": "Fireworks",
+    "format": "openai",
+    "baseUrl": "https://api.fireworks.ai/inference/v1",
+    "authType": "bearer",
+    "modelsEndpoint": "/models",
+    "keyRequired": true,
+    "defaultModel": "accounts/fireworks/models/gpt-oss-120b"
+  },
+  "huggingface": {
+    "name": "Hugging Face",
+    "format": "openai",
+    "baseUrl": "https://router.huggingface.co/v1",
+    "authType": "bearer",
+    "modelsEndpoint": "/models",
+    "keyRequired": true,
+    "defaultModel": "openai/gpt-oss-120b"
+  },
+  "sambanova": {
+    "name": "SambaNova",
+    "format": "openai",
+    "baseUrl": "https://api.sambanova.ai/v1",
+    "authType": "bearer",
+    "modelsEndpoint": "/models",
+    "keyRequired": true,
+    "defaultModel": "gpt-oss-120b"
+  },
+  "novita": {
+    "name": "Novita",
+    "format": "openai",
+    "baseUrl": "https://api.novita.ai/openai",
+    "authType": "bearer",
+    "modelsEndpoint": "/models",
+    "keyRequired": true,
+    "defaultModel": "zai-org/glm-5.3-flash"
+  },
+  "nebius": {
+    "name": "Nebius",
+    "format": "openai",
+    "baseUrl": "https://api.studio.nebius.com/v1",
+    "authType": "bearer",
+    "modelsEndpoint": "/models",
+    "keyRequired": true,
+    "defaultModel": "openai/gpt-oss-120b"
+  },
   "gemini": {
     "name": "Gemini (OpenAI-compat)",
     "format": "openai",

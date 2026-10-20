@@ -28,14 +28,47 @@ function pad(str, len) {
   return str.length >= len ? str.slice(0, len) : str + " ".repeat(len - str.length);
 }
 
-export function OverlayMenu({ overlay, height }) {
-  if (!overlay) return null;
+/**
+ * The line under the model list: how fast the marked model is now (OpenRouter,
+ * fetched when the marker reaches it) and what its description begins with.
+ */
+export function modelDetail(item, speed) {
+  if (!item) return "";
+  const parts = [];
+  if (speed?.loading) parts.push("speed: asking...");
+  else if (speed && !speed.failed) {
+    const s = [];
+    if (speed.tps != null) s.push(`${Math.round(speed.tps)} tok/s`);
+    if (speed.firstMs != null) s.push(`first token ${(speed.firstMs / 1000).toFixed(1)} s`);
+    if (speed.uptime != null) s.push(`up ${Number(speed.uptime).toFixed(0)}%`);
+    parts.push(s.length ? s.join(", ") + (speed.provider ? ` (${speed.provider})` : "") : "no speed data now");
+  }
+  if (item.description) parts.push(String(item.description).replace(/\s+/g, " "));
+  return parts.join("  ·  ");
+}
 
-  const { title, items: rawItems, index, loading, type, sortMode } = overlay;
+/**
+ * True when every word of the filter is in the item's id, name or text, case
+ * ignored: "glm 5" finds z-ai/glm-5.3.
+ */
+export function matchesFilter(item, filter) {
+  const words = String(filter || "").toLowerCase().split(/\s+/).filter(Boolean);
+  if (!words.length) return true;
+  const hay = [item.id, item.name, item.last].filter(Boolean).join(" ").toLowerCase();
+  return words.every((w) => hay.includes(w));
+}
 
-  // Sort items for model view
-  const items = type === "model" && sortMode && sortMode !== "name"
-    ? [...rawItems].sort((a, b) => {
+/**
+ * The items as the list shows them: sorted (model lists, Ctrl+S), then
+ * narrowed by what was typed. The keys use the same list, so Enter takes the
+ * row the marker is on; it used to index the unsorted items, and after Ctrl+S
+ * it picked another model than the one shown.
+ */
+export function overlayItems(overlay) {
+  if (!overlay) return [];
+  const { items: rawItems, type, sortMode, filter } = overlay;
+  const sorted = type === "model" && sortMode && sortMode !== "name"
+    ? [...(rawItems || [])].sort((a, b) => {
         if (sortMode === "price") {
           return (a._priceNum ?? Infinity) - (b._priceNum ?? Infinity);
         }
@@ -44,7 +77,15 @@ export function OverlayMenu({ overlay, height }) {
         }
         return 0;
       })
-    : rawItems;
+    : (rawItems || []);
+  return filter ? sorted.filter((it) => matchesFilter(it, filter)) : sorted;
+}
+
+export function OverlayMenu({ overlay, height }) {
+  if (!overlay) return null;
+
+  const { title, items: rawItems, index, loading, type, sortMode, filter } = overlay;
+  const items = overlayItems(overlay);
   const cols = process.stdout.columns || 80;
 
   if (loading) {
@@ -56,17 +97,19 @@ export function OverlayMenu({ overlay, height }) {
   }
 
   if (!items || !items.length) {
+    const none = filter && rawItems?.length;
     return h(Box, { flexDirection: "column", height },
       h(Text, { bold: true, color: "cyan" }, `  ${title}`),
       h(Text, { dimColor: true }, ""),
-      h(Text, { color: "red" }, "  No items available"),
+      h(Text, { color: none ? "yellow" : "red" }, none ? `  Nothing matches "${filter}"` : "  No items available"),
       h(Text, { dimColor: true }, ""),
-      h(Text, { dimColor: true }, "  Esc: back"),
+      h(Text, { dimColor: true }, none ? "  Backspace: edit | Esc: clear the search" : "  Esc: back"),
     );
   }
 
   // Viewport scrolling for long lists
-  const maxVisible = Math.max(3, height - 6); // title + header + footer + hints
+  const detailRows = type === "model" ? 1 : 0;
+  const maxVisible = Math.max(3, height - 6 - detailRows); // title + header + footer + hints (+ detail)
   let startIdx = 0;
   if (items.length > maxVisible) {
     startIdx = Math.max(0, Math.min(index - Math.floor(maxVisible / 2), items.length - maxVisible));
@@ -115,8 +158,14 @@ export function OverlayMenu({ overlay, height }) {
     const ctxW = 6;
     const priceW = 22;
 
+    // Tools and Can only when the provider says what its models can do.
+    const known = items.some((it) => it.tools != null);
+    const toolsW = 6;
+    const capsW = 15;
+
     headerLine = h(Text, { key: "hdr", dimColor: true },
       `    ${pad("Model", idW)} ${pad("Ctx", ctxW)} ${pad("Price (per 1M tok)", priceW)}`
+      + (known ? ` ${pad("Tools", toolsW)} ${pad("Can", capsW)}` : "")
     );
 
     renderItem = (item, realIdx) => {
@@ -124,12 +173,13 @@ export function OverlayMenu({ overlay, height }) {
       const marker = selected ? ">" : " ";
       const id = pad(item.id || "", idW);
       const ctx = pad(item.ctx || "", ctxW);
-      const price = item.price || "";
+      const price = pad(item.price || "", priceW);
+      const tools = known ? ` ${pad(item.tools == null ? "?" : item.tools ? "yes" : "no", toolsW)} ${pad(item.caps || "", capsW)}` : "";
       const cur = item.current ? " *" : "";
       const color = selected ? "green" : item.current ? "cyan" : "white";
 
-      return h(Text, { key: realIdx, bold: selected, color },
-        `  ${marker} ${id} ${ctx} ${price}${cur}`
+      return h(Text, { key: realIdx, bold: selected, color, wrap: "truncate" },
+        `  ${marker} ${id} ${ctx} ${price}${tools}${cur}`
       );
     };
   } else {
@@ -158,18 +208,28 @@ export function OverlayMenu({ overlay, height }) {
 
   const lines = visibleItems.map((item, i) => renderItem(item, startIdx + i));
 
-  const scrollInfo = items.length > maxVisible
+  const scrollInfo = (items.length > maxVisible
     ? `  ${startIdx + 1}-${Math.min(startIdx + maxVisible, items.length)} / ${items.length}`
-    : `  ${items.length} items`;
+    : `  ${items.length} items`) + (filter ? ` of ${rawItems.length}` : "");
 
   const sep = "  " + "-".repeat(Math.min(70, cols - 4));
 
+  const marked = items[index];
+  const detailLine = detailRows
+    ? h(Text, { key: "detail", dimColor: true, wrap: "truncate" }, `  ${modelDetail(marked, overlay.details?.[marked?.id])}`)
+    : null;
+
   return h(Box, { flexDirection: "column", height },
-    h(Text, { bold: true, color: "cyan" }, `  ${title}`),
+    h(Text, { wrap: "truncate" },
+      h(Text, { bold: true, color: "cyan" }, `  ${title}`),
+      filter
+        ? h(Text, { color: "yellow" }, `   search: ${filter}_`)
+        : h(Text, { dimColor: true }, "   type to search")),
     headerLine,
     h(Text, { dimColor: true }, sep),
     ...lines,
     h(Text, { dimColor: true }, sep),
+    detailLine,
     h(Text, { dimColor: true },
       isModel
         ? `  Up/Down: navigate | Enter: select | Ctrl+S: sort (${sortMode || "name"}) | Esc: back${scrollInfo}`

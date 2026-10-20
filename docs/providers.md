@@ -11,6 +11,15 @@ Flint ships with 7 LLM providers. Switch between them at runtime without restart
 | **Anthropic** | `anthropic` | anthropic | x-api-key | GET /models?limit=100 | yes |
 | **Groq** | `groq` | openai | Bearer | GET /models | yes |
 | **Together** | `together` | openai | Bearer | GET /models | yes |
+| **NVIDIA** (build.nvidia.com) | `nvidia` | openai | Bearer | GET /models | yes |
+| **Cerebras** | `cerebras` | openai | Bearer | GET /models | yes |
+| **Mistral** | `mistral` | openai | Bearer | GET /models | yes |
+| **DeepInfra** | `deepinfra` | openai | Bearer | GET /models | yes |
+| **Fireworks** | `fireworks` | openai | Bearer | GET /models | yes |
+| **Hugging Face (router)** | `huggingface` | openai | Bearer | GET /models | yes |
+| **SambaNova** | `sambanova` | openai | Bearer | GET /models | yes |
+| **Novita** | `novita` | openai | Bearer | GET /models | yes |
+| **Nebius** | `nebius` | openai | Bearer | GET /models | yes |
 | **Ollama** (local) | `ollama` | openai | none | GET /api/tags | no |
 | **Gemini** (OpenAI-compatible endpoint) | `gemini` | openai | Bearer | GET /models | yes |
 
@@ -52,7 +61,7 @@ Key derivation:
 
 At start, `OPENROUTER_API_KEY`, `OPENAI_API_KEY` and `ANTHROPIC_API_KEY` (from the environment or `.env`) are imported into encrypted storage when that provider has no stored key yet. The same three variables are also read directly when no stored key exists.
 
-Groq, Together and Gemini have no environment variable: set their keys with `/key groq`, `/key together` or `/key gemini`.
+Groq, Together, NVIDIA, Gemini and the hosts after NVIDIA in the table have no environment variable: set the key with `/key <id>`, or pick the provider in `/provider` and Flint asks for the key there.
 
 ## First-Run Wizard
 

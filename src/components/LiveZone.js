@@ -209,7 +209,10 @@ export function queueRows(queued, limit = QUEUE_ROWS) {
 /** The single status row. */
 export function statusText(state) {
   const parts = [];
-  if (state.model) parts.push(state.model);
+  // The provider beside the model: the same model id can be served by several
+  // (owner, 2026-10-19: "не виден провайдер"). A model id may have slashes of
+  // its own, so the two are joined with a dot, not another slash.
+  if (state.model) parts.push(state.provider ? `${state.provider} · ${state.model}` : state.model);
   if (state.sessionCost != null) parts.push(`${state.sessionCostEstimated ? "~" : ""}$${state.sessionCost.toFixed(4)}`);
   if (state.contextTokens && state.contextLimit) {
     // Size, not a percentage: "ctx 1%" of a 1M window hid 10k of context

@@ -176,3 +176,19 @@ describe("F7 the command", () => {
     fm.setFreeFetchJson(null);
   });
 });
+
+
+describe("modelSpeed", () => {
+  it("takes the fastest host that is up", async () => {
+    const { modelSpeed } = await import("../../src/free-models.js");
+    const eps = [
+      { provider_name: "Slow", uptime_last_30m: 100, throughput_last_30m: { p50: 20 }, latency_last_30m: { p50: 2000 } },
+      { provider_name: "Down", uptime_last_30m: 40, throughput_last_30m: { p50: 300 }, latency_last_30m: { p50: 100 } },
+      { provider_name: "Fast", uptime_last_30m: 99, throughput_last_30m: { p50: 120 }, latency_last_30m: { p50: 350 } },
+    ];
+    const asked = [];
+    const s = await modelSpeed("x/y", { fetchJson: async (url) => { asked.push(url); return { data: { endpoints: eps } }; } });
+    expect(asked[0]).toMatch(/\/models\/x\/y\/endpoints$/);
+    expect(s).toEqual({ tps: 120, firstMs: 350, uptime: 99, provider: "Fast" });
+  });
+});

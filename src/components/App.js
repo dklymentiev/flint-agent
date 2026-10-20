@@ -4,7 +4,6 @@
 // that makes Ink's live output as tall as the window.
 import { freeUsedToday, savedFreeLimit } from "../free-models.js";
 import { config } from "../config.js";
-import { homeStateDir } from "../data-dir.js";
 import { getSpendLevel } from "../spend.js";
 import React from "react";
 import { Box, Text, useInput, useCursor } from "ink";
@@ -16,13 +15,17 @@ import { normalizeInputText } from "../input-text.js";
 import { applyInsert, expandPastes, imageIds, previewPastes, composeRows } from "../ui/paste-tokens.js";
 import { HistoryWriter } from "./HistoryWriter.js";
 import { LiveZoneTop, StatusLine, DOTS_FRAME_MS } from "./LiveZone.js";
-import { OverlayMenu } from "./OverlayMenu.js";
+import { OverlayMenu, overlayItems } from "./OverlayMenu.js";
 import chalk from "chalk";
 
 const { createElement: h, useSyncExternalStore, useState, useRef, useCallback, useEffect } = React;
 
-// Rows the /model and /provider pick lists may take. They scroll within this.
-const OVERLAY_MAX_ROWS = 10;
+// Rows the /model and /provider pick lists may take, title, column header and
+// hints included (6 rows), so up to 15 choices show at once; they scroll within
+// this. Four were too few to choose from, and ten still too few in OpenRouter's
+// long list (owner, 2026-10-19). The live budget still caps it on a short window.
+// The model list has one more: the line about the model the marker is on.
+const OVERLAY_MAX_ROWS = 22;
 // Two Ctrl+C presses this close together exit Flint.
 const CTRL_C_EXIT_MS = 2000;
 
@@ -165,67 +168,23 @@ export function App({ store, onSubmit, onAbort, onQuit, onClipboard, onRecallQue
       // Drill into models for selected provider
       s.overlaySetLoading(true);
       try {
-        const { fetchModels } = await import("../providers/models.js");
         const { hasKey } = await import("../providers/keys.js");
         const { getProvider } = await import("../providers/registry.js");
-        const { readFileSync, existsSync } = await import("node:fs");
-        const { join, dirname } = await import("node:path");
-        const { fileURLToPath } = await import("node:url");
-        const { config } = await import("../config.js");
+        const { openModelList } = await import("../ui/model-list.js");
 
         const provider = getProvider(item.id);
         if (provider.keyRequired && !hasKey(item.id)) {
-          s.addLine(`  No API key for ${provider.name}. Use /key ${item.id} to add one.`);
+          // The secret box is the input line, which the open list hides: close
+          // it, ask, and open the provider's models once the key is saved.
           s.closeOverlay();
-          return;
+          const { askForKey } = await import("../providers/ask-key.js");
+          const saved = await askForKey(store, { ...provider, id: item.id }, (line) => s.addLine(line));
+          if (!saved) return;
+          s.openOverlay("provider", "Select Provider", []);
+          s.overlaySetLoading(true);
         }
 
-        let models = await fetchModels(item.id);
-
-        // Apply curated filter for openrouter (only if user has non-empty ~/.flint/models-curated.json)
-        // Project default is empty [] = show all models
-        if (item.id === "openrouter") {
-          try {
-            // homedir(), not process.env.HOME: HOME is unset on Windows.
-            const userPath = join(homeStateDir(), "models-curated.json");
-            if (existsSync(userPath)) {
-              const data = JSON.parse(readFileSync(userPath, "utf-8"));
-              const prefixes = Array.isArray(data[item.id]) ? data[item.id] : [];
-              if (prefixes.length > 0) {
-                models = models.filter((m) => prefixes.some((px) => m.id.startsWith(px)));
-              }
-            }
-          } catch {}
-        }
-
-        if (!models.length) {
-          s.addLine(`  No models returned from ${provider.name}. Check your API key and network.`);
-          s.closeOverlay();
-          return;
-        }
-
-        models.sort((a, b) => a.id.localeCompare(b.id));
-
-        const modelItems = models.map((m) => {
-          const ctx = m.context_length ? `${(m.context_length / 1000).toFixed(0)}k` : "";
-          const price = m.pricing
-            ? `$${(m.pricing.prompt * 1e6).toFixed(2)} / $${(m.pricing.completion * 1e6).toFixed(2)}`
-            : "";
-          return {
-            id: m.id,
-            ctx,
-            price,
-            current: m.id === config.model,
-            providerId: item.id,
-            _priceNum: m.pricing ? m.pricing.prompt * 1e6 : Infinity,
-            _ctxNum: m.context_length || 0,
-          };
-        });
-
-        s.overlayDrilldown("model", `Models -- ${provider.name}`, modelItems, {
-          providerId: item.id,
-          providerName: provider.name,
-        });
+        await openModelList(store, item.id);
       } catch (err) {
         s.addLine(`  Error loading models: ${err.message}`);
         s.closeOverlay();
@@ -272,25 +231,59 @@ export function App({ store, onSubmit, onAbort, onQuit, onClipboard, onRecallQue
   }, [store]);
 
 
+  // The speed of the model the marker is on, asked once per model and kept for
+  // the list's life; only OpenRouter publishes it. A short wait, so scrolling
+  // through the list does not ask for every row passed.
+  const markedModel = ui.overlay?.type === "model" && ui.overlay.parent?.providerId === "openrouter"
+    ? overlayItems(ui.overlay)[ui.overlay.index]?.id : null;
+  const markedKnown = markedModel ? Boolean(ui.overlay.details?.[markedModel]) : true;
+  useEffect(() => {
+    if (!markedModel || markedKnown) return undefined;
+    const t = setTimeout(async () => {
+      store.getState().overlaySetDetail(markedModel, { loading: true });
+      try {
+        const { modelSpeed } = await import("../free-models.js");
+        store.getState().overlaySetDetail(markedModel, await modelSpeed(markedModel));
+      } catch {
+        store.getState().overlaySetDetail(markedModel, { failed: true });
+      }
+    }, 250);
+    return () => clearTimeout(t);
+  }, [markedModel, markedKnown, store]);
+
   useInput((ch, key) => {
     // Pick list (/model, /provider) owns the keyboard while open.
     if (ui.overlay) {
       const s = store.getState();
       const o = s.overlay;
       if (!o || o.loading) return;
+      // The list as shown (sorted, filtered): the marker's row is what Enter takes.
+      const shown = overlayItems(o);
       if (key.upArrow) { s.overlaySetIndex(Math.max(0, o.index - 1)); return; }
-      if (key.downArrow) { s.overlaySetIndex(Math.min((o.items?.length || 1) - 1, o.index + 1)); return; }
+      if (key.downArrow) { s.overlaySetIndex(Math.min((shown.length || 1) - 1, o.index + 1)); return; }
       if (key.return) {
-        const item = o.items?.[o.index];
+        const item = shown[o.index];
         if (item) handleOverlaySelect(item);
         return;
       }
       if (key.escape) {
+        // A search is cleared first; the next Esc goes back.
+        if (o.filter) { s.overlaySetFilter(""); return; }
         if (o.parent) { if (onSubmit) onSubmit("/provider"); } else { s.closeOverlay(); }
         return;
       }
       // Ctrl+S cycles the sort mode (name, price, context)
       if (ch === "\x13" || (key.ctrl && ch === "s")) { s.overlayCycleSort(); return; }
+      if (key.backspace || key.delete) {
+        if (o.filter) s.overlaySetFilter(o.filter.slice(0, -1));
+        return;
+      }
+      // Anything printable narrows the list (owner, 2026-10-19: a search in the
+      // model list).
+      if (ch && !key.ctrl && !key.meta && !key.tab && !/[\x00-\x1f\x7f]/.test(ch)) {
+        s.overlaySetFilter((o.filter || "") + ch);
+        return;
+      }
       return;
     }
 

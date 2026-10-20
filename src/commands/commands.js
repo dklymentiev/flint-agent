@@ -561,8 +561,19 @@ export function registerCommands(store) {
       if (s.contextLimit) {
         log(chalk.gray(`  Context: ${(s.contextLimit / 1000).toFixed(0)}k tokens`));
       }
-      log(chalk.gray('  Usage: /model <model-id> to switch, e.g. /model google/gemini-2.5-flash'));
+      log(chalk.gray("  Pick another below, or /model <model-id>; /provider for another provider."));
       log("");
+      // The provider's models, the marker on the current one.
+      const { getProvider } = await import("../providers/registry.js");
+      s.openOverlay("model", `Models -- ${getProvider(config.provider)?.name || config.provider}`, []);
+      s.overlaySetLoading(true);
+      try {
+        const { openModelList } = await import("../ui/model-list.js");
+        await openModelList(store, config.provider);
+      } catch (err) {
+        log(chalk.red(`  Error loading models: ${err.message}`));
+        store.getState().closeOverlay();
+      }
     },
 
     async "/project"(arg) {
@@ -606,8 +617,8 @@ export function registerCommands(store) {
           return;
         }
         if (provider.keyRequired && !hasKey(name)) {
-          log(chalk.red(`  No API key for ${provider.name}. Use /key ${name} to add one.`));
-          return;
+          const { askForKey } = await import("../providers/ask-key.js");
+          if (!(await askForKey(store, { ...provider, id: name }, (line) => log(chalk.cyan(line))))) return;
         }
         config.provider = name;
         setActiveProvider(name);
@@ -628,7 +639,7 @@ export function registerCommands(store) {
         const providers = listProviders();
         const items = providers.map((p) => {
           const keyInfo = p.keyRequired
-            ? (hasKey(p.id) ? "yes" : "no")
+            ? (hasKey(p.id) ? "yes" : "no, Enter adds one")
             : "local";
           return {
             id: p.id,
@@ -681,26 +692,9 @@ export function registerCommands(store) {
         return;
       }
 
-      // Prompt for key input (read from stdin)
-      log(chalk.cyan(`  Enter API key for ${provider.name}:`));
-      log(chalk.gray("  (paste key and press Enter)"));
-
-      // The key is read through the app's own input box in secret mode, NOT
-      // through a second readline on stdin. Owner, 2026-10-01: readline and
-      // the Ink input both received the pasted line; readline saved the key
-      // and the Ink input submitted it as a chat message, so the key was sent
-      // to the model and written to the session log. Secret mode masks the
-      // text and hands it only to this resolver (see App.js).
-      const key = await new Promise((resolve) => {
-        store.setState({ secretPrompt: { label: `${provider.name} API key`, resolve } });
-      });
-      const trimmed = String(key || "").trim();
-      if (!trimmed) {
-        log(chalk.gray("  Cancelled."));
-        return;
-      }
-      await setKey(providerId, trimmed);
-      log(chalk.green(`  Key saved for ${provider.name} (encrypted).`));
+      // Read in the app's secret input box, never a second readline (ask-key.js).
+      const { askForKey } = await import("../providers/ask-key.js");
+      if (!(await askForKey(store, { ...provider, id: providerId }, (line) => log(chalk.cyan(line))))) return;
 
       // If this is the current provider, refresh the cached key
       if (providerId === config.provider) {

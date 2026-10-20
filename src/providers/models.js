@@ -112,6 +112,10 @@ export async function fetchModels(providerId) {
         // What the model accepts, when the provider publishes it: true/false
         // for images, null when it does not say.
         sees_images: seesImagesFrom(m.architecture),
+        // OpenRouter lists the request parameters a model takes; the ones that
+        // matter for an agent are read off it. null when the provider does not say.
+        ...capabilitiesFrom(m.supported_parameters),
+        description: m.description || null,
         pricing: m.pricing ? {
           prompt: parseFloat(m.pricing.prompt || 0),
           completion: parseFloat(m.pricing.completion || 0),
@@ -129,6 +133,16 @@ export async function fetchModels(providerId) {
     log.warn("fetchModels: exception", { providerId, error: err.message });
     return [];
   }
+}
+
+/** tools / reasoning / structured output from OpenRouter's supported_parameters. */
+export function capabilitiesFrom(params) {
+  if (!Array.isArray(params)) return { tools: null, reasoning: null, structured: null };
+  return {
+    tools: params.includes("tools"),
+    reasoning: params.includes("reasoning") || params.includes("include_reasoning"),
+    structured: params.includes("structured_outputs") || params.includes("response_format"),
+  };
 }
 
 // OpenRouter: architecture.input_modalities ["text", "image", ...], or the

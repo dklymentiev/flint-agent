@@ -185,6 +185,33 @@ async function defaultFetchJson(url) {
   return r.ok ? r.json() : null;
 }
 
+/**
+ * Speed of one OpenRouter model now: its best host's throughput, time to the
+ * first token and uptime over the last 30 minutes (endpointStats). One request;
+ * the model list asks it only for the row the marker is on.
+ */
+export async function modelSpeed(id, { fetchJson = fetchJsonOverride || openrouterFetchJson } = {}) {
+  const eps = ((await fetchJson(`${openrouterApi()}/models/${id}/endpoints`))?.data?.endpoints || []).filter(Boolean);
+  // The fastest host that is up, which is what a call can get; endpointStats
+  // alone takes the first of many at 100% uptime, often a slow one.
+  const up = eps.filter((e) => e.uptime_last_30m == null || e.uptime_last_30m >= AVAILABLE_UPTIME);
+  const fastest = [...(up.length ? up : eps)].sort((a, b) =>
+    (b.throughput_last_30m?.p50 ?? -1) - (a.throughput_last_30m?.p50 ?? -1))[0];
+  return endpointStats(fastest ? [fastest] : []);
+}
+
+// OpenRouter gives latency and throughput only to a caller with a key, and the
+// model list can be open while another provider is the active one: its own key.
+async function openrouterFetchJson(url) {
+  const { getKey } = await import("./providers/keys.js");
+  const key = await getKey("openrouter").catch(() => null);
+  const r = await fetch(url, {
+    headers: key ? { Authorization: `Bearer ${key}` } : {},
+    signal: AbortSignal.timeout(15000),
+  });
+  return r.ok ? r.json() : null;
+}
+
 /** The free models, ranked, each with its stats, and the account's daily limit. */
 export async function loadFreeModels({ fetchJson = fetchJsonOverride || defaultFetchJson } = {}) {
   const catalog = (await fetchJson(`${openrouterApi()}/models`))?.data || [];

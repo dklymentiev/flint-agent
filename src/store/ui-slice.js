@@ -79,12 +79,22 @@ export const createUiSlice = (set, get) => ({
   },
 
   // Overlay menu state
-  overlay: null,        // null | { type: "provider" | "model", title, items, index, parent }
+  overlay: null,        // null | { type: "provider" | "model", title, items, index, parent, filter }
   openOverlay(type, title, items) {
-    set({ overlay: { type, title, items, index: 0, parent: null, loading: false, sortMode: "name" } });
+    set({ overlay: { type, title, items, index: 0, parent: null, loading: false, sortMode: "name", filter: "" } });
   },
   overlayDrilldown(type, title, items, parent) {
-    set({ overlay: { type, title, items, index: 0, parent, loading: false, sortMode: "name" } });
+    set({ overlay: { type, title, items, index: 0, parent, loading: false, sortMode: "name", filter: "" } });
+  },
+  // What was fetched later for one row (the model list's speed), by item id.
+  overlaySetDetail(id, detail) {
+    const o = get().overlay;
+    if (o) set({ overlay: { ...o, details: { ...(o.details || {}), [id]: detail } } });
+  },
+  // What the operator typed into an open list: it narrows the list (overlayItems).
+  overlaySetFilter(filter) {
+    const o = get().overlay;
+    if (o) set({ overlay: { ...o, filter, index: 0 } });
   },
   overlayCycleSort() {
     const o = get().overlay;

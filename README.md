@@ -16,8 +16,9 @@ commands, searches the web, uses MCP servers and remembers what you taught
 it. On OpenRouter's free tier, `/model free` picks the free models that can
 call tools and falls back to another when one is busy.
 
-It works with OpenRouter, OpenAI, Anthropic, Google, Groq, Together or a
-local Ollama, and installs as a single npm package: no Python, no Docker, no
+It works with OpenRouter, OpenAI, Anthropic, Google, Groq, Together, NVIDIA,
+Cerebras, Mistral, DeepInfra, Fireworks, Hugging Face, SambaNova, Novita, Nebius
+or a local Ollama, and installs as a single npm package: no Python, no Docker, no
 background service.
 
 Project page: https://klymentiev.com/projects/flint
@@ -155,6 +156,15 @@ newest first. **Ctrl+C** twice exits. **Up/Down** recalls earlier input.
 | Google Gemini (OpenAI-compatible endpoint) | gemini-3-flash-preview |
 | Groq | llama-3.3-70b-versatile |
 | Together | meta-llama/Llama-3.3-70B-Instruct-Turbo |
+| [NVIDIA](https://build.nvidia.com) | z-ai/glm-5.3 |
+| Cerebras | gpt-oss-120b |
+| Mistral | mistral-small-latest |
+| DeepInfra | openai/gpt-oss-120b |
+| Fireworks | accounts/fireworks/models/gpt-oss-120b |
+| Hugging Face (router) | openai/gpt-oss-120b |
+| SambaNova | gpt-oss-120b |
+| Novita | zai-org/glm-5.3-flash |
+| Nebius | openai/gpt-oss-120b |
 | Ollama (local) | llama3.2 |
 
 Switch with `/provider` and `/model`, also in the middle of a conversation.
