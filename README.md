@@ -338,7 +338,9 @@ flint --print --verbose --model stealth/space-bunny-alpha \
 
 Write `{"type":"user","message":{"role":"user","content":"..."}}` lines to
 stdin; read `system`, `assistant`, `user` (tool results) and `result` lines
-from stdout. The working folder's `CLAUDE.md` files and `.mcp.json` are read.
+from stdout. The working folder's `FLINT.md` files (or, without them, its
+`CLAUDE.md` files) and `.mcp.json` are read; `--tools` and `--disallowedTools`
+say which tools the agent has.
 See [docs/stdio-mode.md](docs/stdio-mode.md).
 
 ### HTTP API

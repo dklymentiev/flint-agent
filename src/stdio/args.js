@@ -7,7 +7,7 @@
 //         --input-format stream-json --output-format stream-json \
 //         [--session-id <id> | --resume <id>] [--dangerously-skip-permissions] \
 //         [--system-prompt-file <path>] [--append-system-prompt <text>] \
-//         [--mcp-config <path>]
+//         [--mcp-config <path>] [--tools <list>] [--disallowedTools <list>]
 //
 // `--stdio` alone means the same thing. Flags such CLIs have and Flint does
 // not need (--add-dir, --max-turns, ...) are accepted and ignored, so a host
@@ -17,7 +17,7 @@ const VALUE_FLAGS = new Set([
   "--model", "--session-id", "--resume", "-r", "--system-prompt", "--system-prompt-file",
   "--append-system-prompt", "--append-system-prompt-file", "--mcp-config", "--input-format",
   "--output-format", "--cwd", "--max-turns", "--add-dir", "--permission-mode",
-  "--allowedTools", "--allowed-tools", "--disallowedTools", "--disallowed-tools",
+  "--allowedTools", "--allowed-tools", "--disallowedTools", "--disallowed-tools", "--tools",
   "--fallback-model", "--settings", "--data-dir",
 ]);
 
@@ -66,6 +66,10 @@ export function parseStdioArgs(argv) {
     mcpConfig: values["--mcp-config"] ?? null,
     cwd: values["--cwd"] ?? null,
     dataDir: values["--data-dir"] ?? null,
+    // Which tools the agent has (tools/tool-filter.js). --allowedTools only
+    // means "without asking" and is accepted and ignored.
+    tools: values["--tools"] ?? null,
+    disallowedTools: values["--disallowedTools"] ?? values["--disallowed-tools"] ?? null,
     skipPermissions: flags.has("--dangerously-skip-permissions") || values["--permission-mode"] === "bypassPermissions",
     verbose: flags.has("--verbose"),
   };

@@ -1,5 +1,5 @@
 // Integration test: headless mode should support launch identity settings
-// (instructions via --system-prompt / --system-prompt-file / CLAUDE.md,
+// (instructions via --system-prompt / --system-prompt-file / FLINT.md / CLAUDE.md,
 // and MCP servers via .mcp.json or MCP_SERVERS env).
 //
 // This test calls bootstrap() directly with a headless cli object, like
@@ -92,6 +92,47 @@ describe("headless launch identity", () => {
     expect(app.hostPrompt).toBeTruthy();
     expect(app.hostPrompt).toContain("IDENTITY_FROM_CLAUDE_MD");
     try { process.chdir(origCwd); } catch {}
+  }, 60000);
+
+  it("reads FLINT.md from --cwd in headless mode, and then not CLAUDE.md", async () => {
+    const workDir = path.join(tmpBase, "work2f");
+    const dataDir = path.join(tmpBase, "data2f");
+    const homeDir = path.join(tmpBase, "home2f");
+    fs.mkdirSync(workDir, { recursive: true });
+    fs.mkdirSync(dataDir, { recursive: true });
+    fs.mkdirSync(path.join(homeDir, ".flint"), { recursive: true });
+    fs.writeFileSync(path.join(workDir, "FLINT.md"), "IDENTITY_FROM_FLINT_MD");
+    fs.writeFileSync(path.join(workDir, "CLAUDE.md"), "IDENTITY_FROM_CLAUDE_MD");
+    isolatedEnv(dataDir, homeDir);
+
+    const { app } = await startHeadlessRun(workDir);
+    const { getSystemMessage } = await import("../../src/agent/system-prompt.js");
+    const prompt = getSystemMessage().content;
+
+    expect(app.hostPrompt).toContain("IDENTITY_FROM_FLINT_MD");
+    expect(app.hostPrompt).not.toContain("IDENTITY_FROM_CLAUDE_MD");
+    expect(prompt).toContain("IDENTITY_FROM_FLINT_MD");
+    expect(prompt).not.toContain("You are FLINT");
+    try { process.chdir(origCwd); } catch {}
+  }, 60000);
+
+  it("gives the agent only the tools --tools names", async () => {
+    const workDir = path.join(tmpBase, "work2t");
+    const dataDir = path.join(tmpBase, "data2t");
+    const homeDir = path.join(tmpBase, "home2t");
+    fs.mkdirSync(workDir, { recursive: true });
+    fs.mkdirSync(dataDir, { recursive: true });
+    fs.mkdirSync(path.join(homeDir, ".flint"), { recursive: true });
+    isolatedEnv(dataDir, homeDir);
+
+    await startHeadlessRun(workDir, { tools: "Read,think" });
+    const { getDefinitions, setToolFilter } = await import("../../src/tools/registry.js");
+    try {
+      expect(getDefinitions().map((t) => t.function.name).sort()).toEqual(["read_file", "think"]);
+    } finally {
+      setToolFilter(null);
+      try { process.chdir(origCwd); } catch {}
+    }
   }, 60000);
 
   it("reads --system-prompt-file in headless mode", async () => {

@@ -113,7 +113,7 @@ Central configuration object. Reads from CLI args, env vars, persisted provider 
 | `securityPolicy` | string | `"normal"` | `AGENT_SECURITY_POLICY` | Security profile: strict/normal/permissive |
 | `extractionModel` | string | the active model | `EXTRACTION_MODEL` | Model for fact extraction; follows the active provider/model unless overridden |
 | `compressThreshold` | number | `500` | `COMPRESS_THRESHOLD` | Char threshold for head/tail compression |
-| `maxContextChars` | number | `20000` | `MAX_CONTEXT_CHARS` | Max chars for FLINT.md context injection |
+| `maxContextChars` | number | `20000` | `MAX_CONTEXT_CHARS` | Max chars for `.flint/notes.md` context injection |
 | `maxPromptTokens` | number | `100000` | `MAX_PROMPT_TOKENS` | Budget for the system prompt sections (`src/agent/prompt-budget.js`) |
 | `intentModel` | string\|null | `null` | `INTENT_MODEL` | Model for intent classification. Unset turns the classifier off |
 
@@ -505,9 +505,9 @@ Tries to call `agent-memory context --budget 3000` binary for pinned context. Ca
 #### `getSystemMessage(sessionId, opts)` -> `{ role: "system", content: string }`
 
 Builds the complete system message. Sections are budgeted by `createBudgetAllocator()` (`src/agent/prompt-budget.js`); the stable sections come first so the provider's prompt cache covers them. Components:
-1. Core prompt from Flint's own `system.md` (or a one-line fallback), plus a token-saving section in economy spend mode
-2. Project rules from `FLINT.md`, found by walking up from the CWD (with injection scan, `src/agent/project-context.js`)
-3. Profile prompt (role-specific); in stdio mode the host's prompt (CLAUDE.md files, `--system-prompt`, `--append-system-prompt`) is added here
+1. "You are FLINT", only when there are no host instructions (item 3); then the core prompt from Flint's own `system.md` (how to work), plus a token-saving section in economy spend mode
+2. The agent's notes from `.flint/notes.md` in the work folder, as untrusted context (with injection scan, `src/agent/project-context.js`)
+3. Profile prompt (role-specific), then the host's instructions in every mode (`app.hostPrompt`, `src/stdio/session.js` `hostPromptFrom`): `--system-prompt`, the `FLINT.md` files from the work folder up (or the `CLAUDE.md` files where there is no `FLINT.md`), `--append-system-prompt`
 4. Environment info (OS, architecture, shell, CWD). No date or time: each operator message carries `[Local time: ...]` instead (`src/agent/time-stamp.js`)
 5. Child agent mode instructions (if `AGENT_TASK_ID` set)
 6. Flint capabilities from the bundled README

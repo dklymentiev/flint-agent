@@ -13,7 +13,8 @@ flint --print --verbose --model <model id> \
       --input-format stream-json --output-format stream-json \
       [--session-id <id> | --resume <id>] [--dangerously-skip-permissions] \
       [--system-prompt-file <path>] [--append-system-prompt <text>] \
-      [--mcp-config <path>] [--cwd <folder>]
+      [--mcp-config <path>] [--cwd <folder>] \
+      [--tools <list>] [--disallowedTools <list>]
 ```
 
 `--stdio` alone means the same. `flint` (bin/flint.js) runs this mode in its
@@ -31,11 +32,27 @@ environment variables. Agent CLI flags Flint has no use for (`--add-dir`,
 
 The process works in the folder it is started in (or `--cwd`):
 
-- **Instructions**: every `CLAUDE.md` from the folder up to the root, outermost
-  first, then `--system-prompt`/`--system-prompt-file`, then
-  `--append-system-prompt`. They are added to Flint's own prompt as the
-  agent's role and take precedence over its defaults (name, role, how to
-  answer); Flint's prompt stays, because it is what describes Flint's tools.
+- **Instructions**: `--system-prompt`/`--system-prompt-file`, then every
+  `FLINT.md` from the folder up to the root, outermost first, then
+  `--append-system-prompt`. Where there is no `FLINT.md` at all, the
+  `CLAUDE.md` files are read the same way instead; a folder with both gives
+  the agent only `FLINT.md`. They are added to Flint's own prompt as the
+  agent's identity and role and take precedence over its defaults (name, role,
+  how to answer). Flint's prompt stays, because it says how to work with its
+  tools, but with instructions present it does not call the agent FLINT.
+- **Notes**: `.flint/notes.md` in the folder is the agent's own notebook. It
+  reads and writes it itself, and it is put into the prompt as untrusted
+  context, scanned for injected instructions.
+- **Tools**: `--tools` names the only tools the agent has, `--disallowedTools`
+  (or `--disallowed-tools`) takes tools away; a list is comma or space
+  separated. A tool left out is not offered to the model, `tool_search` does
+  not find it, and a call to it is refused. Names may be Flint's
+  (`read_file`, `mcp_messaging_send`), Claude Code's (`Read`, `Bash`,
+  `WebSearch`) or Claude Code's MCP form (`mcp__messaging` for a whole server,
+  `mcp__messaging__send` for one tool); a rule in parentheses, `Bash(git *)`,
+  counts as the whole tool. An empty `--tools ""` leaves no tools. Without
+  either flag every tool stays. `--allowedTools` means "run without asking"
+  in Claude Code and narrows nothing; Flint accepts it and ignores it.
 - **MCP servers**: `.mcp.json` in the folder, or the file `--mcp-config`
   names, in the common mcpServers format: `{"mcpServers": {name: {"type": "http",
   "url", "headers"} or {"type": "stdio", "command", "args", "env"}}}`. They
@@ -154,7 +171,8 @@ can start Flint the same way. What changes on the host's side:
   so it can always say `--resume`.
 
 Checked live on Windows and on Linux (Debian 12, a Python asyncio driver
-shaped like such a host, 2026-10-02): role from the CLAUDE.md chain,
+shaped like such a host, 2026-10-02): role from the CLAUDE.md chain (FLINT.md
+since 1.16.0),
 `.mcp.json` stdio and HTTP servers, relative paths and `pwd`, interrupt
 during a running command, SIGTERM to the process group with a background
 process running, `--resume` in a new process.

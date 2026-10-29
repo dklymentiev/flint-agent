@@ -37,7 +37,11 @@ export function parseCLI() {
     const appendSystemPrompt = (appendSystemPromptIdx !== -1 && args[appendSystemPromptIdx + 1]) ? args[appendSystemPromptIdx + 1] : null;
     const appendSystemPromptFileIdx = args.indexOf("--append-system-prompt-file");
     const appendSystemPromptFile = (appendSystemPromptFileIdx !== -1 && args[appendSystemPromptFileIdx + 1]) ? args[appendSystemPromptFileIdx + 1] : null;
-    return { action: "headless", task, cwd, budget, timeLimit, id: session, systemPrompt, systemPromptFile, appendSystemPrompt, appendSystemPromptFile };
+    const toolsIdx = args.indexOf("--tools");
+    const tools = (toolsIdx !== -1 && args[toolsIdx + 1] !== undefined) ? args[toolsIdx + 1] : null;
+    const disallowedIdx = Math.max(args.indexOf("--disallowedTools"), args.indexOf("--disallowed-tools"));
+    const disallowedTools = (disallowedIdx !== -1 && args[disallowedIdx + 1]) ? args[disallowedIdx + 1] : null;
+    return { action: "headless", task, cwd, budget, timeLimit, id: session, systemPrompt, systemPromptFile, appendSystemPrompt, appendSystemPromptFile, tools, disallowedTools };
   }
   // Minimal runtime probe: verifies key, model, and tool round-trip without
   // running a full task. Exits with 0 (ok), 10 (no key), 11 (model did not

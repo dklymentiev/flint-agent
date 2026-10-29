@@ -31,7 +31,7 @@ export function initRegistry(store) {
   // FLINT_TOOL_MODE=search uses it for everything outside the core set. The
   // handler searches allTools live, so MCP tools registered later are found.
   resetLoadedTools();
-  handlerMap[TOOL_SEARCH_NAME] = createToolSearchHandler(() => allTools);
+  handlerMap[TOOL_SEARCH_NAME] = createToolSearchHandler(() => getDefinitions());
   allTools.push(toolSearchDef);
 
   // Context swap (docs/context-swap.md): reading back what the loop moved out
@@ -183,17 +183,28 @@ export async function mcpReconnect(name) {
   return result;
 }
 
-export function getDefinitions() {
-  // FLINT_TOOL_ALLOWLIST: comma-separated tool names. When set, the agent sees
+// The host's --tools / --disallowedTools (tool-filter.js), null for every tool.
+let toolFilter = null;
+
+export function setToolFilter(fn) {
+  toolFilter = fn;
+}
+
+// Whether this session has the tool at all. The one check behind the list the
+// model gets, tool_search and executeTool: a filter on the list alone left a
+// hidden tool one search or one call by name away.
+function toolAllowed(name) {
+  // FLINT_TOOL_ALLOWLIST: comma-separated tool names. When set, the agent has
   // ONLY these tools -- least-privilege mode for embedded/headless executors
   // (e.g. a host that runs Flint with just its delivery plugin: a full
   // toolset let the executor shell around the host and chase stale tasks).
   const allow = (process.env.FLINT_TOOL_ALLOWLIST || "").trim();
-  if (allow) {
-    const names = new Set(allow.split(",").map((x) => x.trim()).filter(Boolean));
-    return allTools.filter((t) => names.has(t.function?.name));
-  }
-  return allTools;
+  if (allow && !allow.split(",").map((x) => x.trim()).includes(name)) return false;
+  return !toolFilter || toolFilter(name);
+}
+
+export function getDefinitions() {
+  return allTools.filter((t) => toolAllowed(t.function?.name));
 }
 
 // ── Schema Validation ────────────────────────────────────────
@@ -295,7 +306,7 @@ function _levDistance(a, b) {
 // Fuzzy-match a tool name against the registry. Returns the closest registered
 // name if a unique match exists within maxDistance, else null.
 function _repairToolName(name, maxDistance = 2) {
-  const candidates = Object.keys(handlerMap);
+  const candidates = Object.keys(handlerMap).filter(toolAllowed);
   if (candidates.includes(name)) return name;
   const scored = candidates
     .map((c) => ({ name: c, dist: _levDistance(name, c) }))
@@ -308,6 +319,9 @@ function _repairToolName(name, maxDistance = 2) {
 }
 
 export async function executeTool(name, args) {
+  if (handlerMap[name] && !toolAllowed(name)) {
+    return `Error: tool "${name}" is not available in this session`;
+  }
   let handler = handlerMap[name];
   let repairedName = null;
   if (!handler) {

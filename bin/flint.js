@@ -13,14 +13,6 @@ import { spawn } from "node:child_process";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const launcher = join(__dirname, "..", "src", "launcher.js");
 
-// A host must be able to reject older stdio builds before giving them a
-// provider key: they imported API keys from the environment into keys.enc.
-// This check starts no agent and reads no credential.
-if (process.argv.includes("--sn-stdio-ephemeral-key-check")) {
-  console.log("flint-stdio-ephemeral-key-v1");
-  process.exit(0);
-}
-
 // `flint --version`: the quickest check that the command works after an
 // install, without starting anything.
 if (process.argv.includes("--version") || process.argv.includes("-v")) {

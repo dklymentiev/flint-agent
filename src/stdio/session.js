@@ -1,6 +1,6 @@
 // The stdio mode's session logic, kept free of the agent's own modules so it
-// can be tested alone: the host's instructions (CLAUDE.md and the prompt
-// flags), the MCP config file, and the loop that turns input lines into turns
+// can be tested alone: the host's instructions (FLINT.md or CLAUDE.md and the
+// prompt flags), the MCP config file, and the loop that turns input lines into turns
 // and turns into protocol lines. stdio/run.js wires it to the agent.
 
 import { existsSync, readFileSync } from "node:fs";
@@ -47,16 +47,11 @@ export function visibleTextStream(emit) {
   };
 }
 
-/**
- * CLAUDE.md files an agent in this folder is expected to read: the folder's
- * own and every parent's, outermost first. A host may keep an agent's role
- * there and shared rules one level up.
- */
-export function claudeMdChain(cwd) {
+function fileChain(name, cwd) {
   const found = [];
   let dir = path.resolve(cwd);
   for (;;) {
-    const f = path.join(dir, "CLAUDE.md");
+    const f = path.join(dir, name);
     if (existsSync(f)) found.unshift(f);
     const up = path.dirname(dir);
     if (up === dir) break;
@@ -66,14 +61,26 @@ export function claudeMdChain(cwd) {
 }
 
 /**
+ * The instruction files an agent in this folder reads: FLINT.md in the folder
+ * and every parent, outermost first, so a host may keep an agent's role there
+ * and shared rules one level up. CLAUDE.md the same way, but only where there
+ * is no FLINT.md at all: a folder kept for Claude Code works as it is, and a
+ * folder with both does not give the agent two identities.
+ */
+export function instructionsChain(cwd) {
+  const flint = fileChain("FLINT.md", cwd);
+  return flint.length ? flint : fileChain("CLAUDE.md", cwd);
+}
+
+/**
  * The host's instructions, in the order they apply: --system-prompt (or its
- * file), the CLAUDE.md chain, then --append-system-prompt (or its file).
+ * file), the instructions chain, then --append-system-prompt (or its file).
  */
 export function hostPromptFrom(opts, { cwd = process.cwd(), read = (f) => readFileSync(f, "utf8") } = {}) {
   const parts = [];
   if (opts.systemPrompt) parts.push(opts.systemPrompt);
   if (opts.systemPromptFile) parts.push(read(opts.systemPromptFile));
-  for (const f of claudeMdChain(cwd)) {
+  for (const f of instructionsChain(cwd)) {
     const text = read(f).trim();
     if (text) parts.push(`<instructions source="${f}">\n${text}\n</instructions>`);
   }
@@ -83,7 +90,8 @@ export function hostPromptFrom(opts, { cwd = process.cwd(), read = (f) => readFi
   if (!body) return "";
   // Without this line the model kept the core prompt's "You are FLINT" over
   // the host's role: a test agent told to answer "Pebble" answered "FLINT."
-  // (2026-10-02). An agent's CLAUDE.md is who it is.
+  // (2026-10-02). The core prompt no longer names the agent when there are
+  // host instructions, but its rules still come first; these win over them.
   return "The program running you gave you the identity, role and rules below. " +
     "They take precedence over the defaults above: where they name you, give you a role, " +
     "or say how to answer, follow them.\n\n" + body;

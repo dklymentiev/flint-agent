@@ -52,7 +52,7 @@ their own; `npx vitest run <file>` runs one file.
   `192.0.2.x`, `example.com` and `/home/user` in tests and examples.
 
 `FLINT.md` at the root holds the project's rules and known traps. Flint reads
-it as project memory when it works on its own code, and it is worth reading
+it as its instructions when it works on its own code, and it is worth reading
 before a bigger change.
 
 ## Pull requests

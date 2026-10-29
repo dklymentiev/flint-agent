@@ -3,7 +3,8 @@ import { config } from "./config.js";
 import { store } from "./store/index.js";
 import { app } from "./app-state.js";
 import { getArgValue } from "./cli.js";
-import { initRegistry, registerMcpTools, registerMeshTools, registerTaskTools, registerDatasetTools, registerScheduleTools, registerInboxTools, registerPlugin, setMcpManagement } from "./tools/registry.js";
+import { initRegistry, registerMcpTools, registerMeshTools, registerTaskTools, registerDatasetTools, registerScheduleTools, registerInboxTools, registerPlugin, setMcpManagement, setToolFilter } from "./tools/registry.js";
+import { toolFilterFrom } from "./tools/tool-filter.js";
 import { loadPlugins } from "./plugins/loader.js";
 import { ensureOwnEnv } from "./tools/own-env.js";
 import { setPluginContext } from "./tools/plugin-tools.js";
@@ -44,13 +45,12 @@ const MCP_HEALTH_TICK_MS = 10_000;
 
 export function buildSystemMessage(profileName, sessionId) {
   app.profileConfig = loadProfile(profileName);
-  // A host's own instructions (stdio mode, --system-prompt-file and friends)
-  // come after the profile. They add to Flint's prompt rather than replace
-  // it: without the core prompt the model would not know Flint's tools.
-  const profileContent = [app.profileConfig.content, app.hostPrompt].filter(Boolean).join("\n\n");
+  // A host's own instructions (FLINT.md, CLAUDE.md, --system-prompt-file and
+  // friends) come after the profile. They add to Flint's prompt rather than
+  // replace it: without the core prompt the model would not know Flint's tools.
   return getSystemMessage(sessionId || null, {
     profile: profileName,
-    profileContent,
+    profileContent: app.profileConfig.content,
     datasets: store.getState().datasets,
   });
 }
@@ -577,6 +577,16 @@ export async function bootstrap(cli, pkg) {
     const identity = launchIdentityOrExit(cli, config.mcpServers);
     app.hostPrompt = identity.hostPrompt;
     config.mcpServers = identity.mcpServers;
+  } else if (cli.action !== "stdio") {
+    // The console reads the same instruction files from the folder it was
+    // started in (stdio mode has read them in index.js already).
+    const { hostPromptFrom } = await import("./stdio/session.js");
+    try {
+      app.hostPrompt = hostPromptFrom({}, { cwd: config.baseDir || process.cwd() });
+    } catch (err) {
+      process.stderr.write(`[flint] cannot read the instructions: ${err.message}\n`);
+      process.exit(2);
+    }
   }
   const explicitProfile = initProfile();
   _t("initProfile");
@@ -591,6 +601,9 @@ export async function bootstrap(cli, pkg) {
   initStore();
   _t("initStore");
   initTools();
+  // The host's --tools / --disallowedTools, before the system prompt lists
+  // the tools. Without them (the console) every tool stays.
+  setToolFilter(toolFilterFrom(cli));
   _t("initTools");
   await initMesh();
   _t("initMesh");

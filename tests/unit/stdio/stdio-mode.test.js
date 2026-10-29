@@ -9,7 +9,7 @@ import { parseStdioArgs, isSafeSessionId } from "../../../src/stdio/args.js";
 import {
   userContent, assistantEvent, toolResultEvent, resultSubtype, resultEvent, parseInputLine, TOOL_RESULT_MAX_CHARS,
 } from "../../../src/stdio/protocol.js";
-import { createStdioSession, visibleTextStream, claudeMdChain, hostPromptFrom, mcpConfigPath } from "../../../src/stdio/session.js";
+import { createStdioSession, visibleTextStream, instructionsChain, hostPromptFrom, mcpConfigPath } from "../../../src/stdio/session.js";
 import { mcpJsonServers, parseServerConfig } from "../../../src/mcp-client.js";
 
 const argv = (...a) => ["node", "flint", ...a];
@@ -345,12 +345,27 @@ describe("the host's instructions", () => {
     mkdirSync(agent, { recursive: true });
     writeFileSync(path.join(root, "agents", "CLAUDE.md"), "Shared rules.");
     writeFileSync(path.join(agent, "CLAUDE.md"), "You are Alex.");
-    const chain = claudeMdChain(agent);
+    const chain = instructionsChain(agent);
     expect(chain.slice(-2)).toEqual([path.join(root, "agents", "CLAUDE.md"), path.join(agent, "CLAUDE.md")]);
     const prompt = hostPromptFrom({ systemPrompt: "From the gateway.", appendSystemPrompt: "Last word." }, { cwd: agent });
     expect(prompt).toMatch(/take precedence/);
     const order = ["From the gateway.", "Shared rules.", "You are Alex.", "Last word."].map((t) => prompt.indexOf(t));
     expect(order.every((i, k) => i >= 0 && (k === 0 || i > order[k - 1]))).toBe(true);
+  });
+
+  it("takes the FLINT.md chain when there is one, and leaves CLAUDE.md out", () => {
+    // One identity per agent: a folder kept for Claude Code as well must not
+    // give Flint two sets of instructions.
+    const root = mkdtempSync(path.join(tmpdir(), "flint-flintmd-"));
+    const agent = path.join(root, "agents", "alex");
+    mkdirSync(agent, { recursive: true });
+    writeFileSync(path.join(root, "agents", "FLINT.md"), "Shared Flint rules.");
+    writeFileSync(path.join(agent, "FLINT.md"), "You are Alex.");
+    writeFileSync(path.join(agent, "CLAUDE.md"), "You are Claude's Alex.");
+    expect(instructionsChain(agent).slice(-2)).toEqual([path.join(root, "agents", "FLINT.md"), path.join(agent, "FLINT.md")]);
+    const prompt = hostPromptFrom({}, { cwd: agent });
+    expect(prompt.indexOf("Shared Flint rules.")).toBeLessThan(prompt.indexOf("You are Alex."));
+    expect(prompt).not.toContain("Claude's Alex");
   });
 
   it("finds .mcp.json in the agent's folder unless --mcp-config names another", () => {

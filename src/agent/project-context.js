@@ -1,36 +1,23 @@
-// Project context (FLINT.md) — the agent's own notebook for the project
-// it's currently working in. Walks up from CWD looking for FLINT.md,
-// scans for prompt injection, returns content. Cached per-CWD for the
-// life of the process (invalidated by file mtime change).
+// The agent's own notes for the folder it works in: .flint/notes.md. The agent
+// reads and writes the file itself (system.md says so); this puts it into the
+// prompt. Scanned for prompt injection, because the agent could be talked into
+// writing an instruction there in one turn and obey it in every later one.
+// Cached per path for the life of the process (invalidated by mtime change).
 //
-// Injected at the top of EVERY LLM prompt — classifier, agent loop,
-// reflection, etc. — so the agent's own project rules are visible
-// before any other context.
+// FLINT.md is not read here. It is the owner's instructions and goes with the
+// host's instructions (stdio/session.js instructionsChain).
 
-import { existsSync, readFileSync, statSync } from "node:fs";
+import { readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { config } from "../config.js";
 import { detectInjection } from "../security/content-fence.js";
 
 const MAX_CHARS = config.maxContextChars;
+const NOTES = join(".flint", "notes.md");
 const _cache = new Map(); // path → { content, mtimeMs }
 
-function findFile(startDir) {
-  let dir = startDir;
-  for (let i = 0; i < 10; i++) {
-    const p = join(dir, "FLINT.md");
-    if (existsSync(p)) return p;
-    const parent = join(dir, "..");
-    if (parent === dir) break;
-    dir = parent;
-  }
-  return null;
-}
-
-export function loadFlintMd(cwd = process.cwd()) {
-  const p = findFile(cwd);
-  if (!p) return null;
-
+export function loadNotes(cwd = process.cwd()) {
+  const p = join(cwd, NOTES);
   let mtimeMs;
   try {
     mtimeMs = statSync(p).mtimeMs;
@@ -51,12 +38,9 @@ export function loadFlintMd(cwd = process.cwd()) {
     content = content.slice(0, MAX_CHARS) + "\n... (truncated)";
   }
 
-  // Injection scan — FLINT.md is user- or agent-written, but we still
-  // scan because the agent itself could be fooled into writing malicious
-  // instructions there via a crafted user message in a prior turn.
   const scan = detectInjection(content);
   if (scan.detected && scan.score >= 3) {
-    const blocked = `[BLOCKED: FLINT.md at ${p} failed injection scan (score ${scan.score})]`;
+    const blocked = `[BLOCKED: .flint/notes.md at ${p} failed injection scan (score ${scan.score})]`;
     _cache.set(p, { content: blocked, mtimeMs });
     return blocked;
   }
@@ -65,12 +49,12 @@ export function loadFlintMd(cwd = process.cwd()) {
   return content;
 }
 
-export function formatFlintMdBlock(cwd = process.cwd()) {
-  const content = loadFlintMd(cwd);
+export function formatNotesBlock(cwd = process.cwd()) {
+  const content = loadNotes(cwd);
   if (!content) return "";
   return [
-    "<trusted-context name=\"project-rules\" source=\"FLINT.md\">",
+    "<untrusted-context name=\"notes\" source=\".flint/notes.md\">",
     content,
-    "</trusted-context>",
+    "</untrusted-context>",
   ].join("\n");
 }

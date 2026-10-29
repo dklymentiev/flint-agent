@@ -26,17 +26,18 @@ import { formatForPrompt as formatUserModel } from "../memory/user-model.js";
 import { compileRules, formatForPrompt as formatRules } from "../memory/rules.js";
 import { getDefinitions } from "../tools/registry.js";
 import { detectInjection } from "../security/content-fence.js";
-import { formatFlintMdBlock } from "./project-context.js";
+import { formatNotesBlock } from "./project-context.js";
 import { inboxPromptHint } from "../memory/inbox.js";
 import { getModeForIntent } from "./modes.js";
 import { config } from "../config.js";
+import { app } from "../app-state.js";
 
 // --- System context (system.md — ships with Flint) ---
 
 function loadSystemMd() {
   // Only Flint's own copy. cwd used to be tried first, so any folder the user
   // started Flint in that held a file called system.md replaced the whole core
-  // prompt without a word. A project speaks through FLINT.md instead.
+  // prompt without a word. The owner speaks through FLINT.md instead.
   const p = join(new URL("../..", import.meta.url).pathname.replace(/^\/([A-Z]:)/, "$1"), "system.md");
   try {
     if (existsSync(p)) {
@@ -112,9 +113,7 @@ function loadFlintCapabilities() {
   return parts.length ? parts.join("\n\n") : null;
 }
 
-// FLINT.md loading moved to ./project-context.js — shared across classifier,
-// agent loop, and any other LLM-call site. See that module for the loader
-// and the trusted-context wrapping.
+const FLINT_IDENTITY = "You are FLINT, a technical AI agent that gets the user's task done with the tools you have.";
 
 const MAX_CONTEXT_CHARS = config.maxContextChars;
 
@@ -211,35 +210,38 @@ function getToolList() {
 // --- Build system prompt ---
 
 function buildPrompt(opts = {}) {
-  const { profile, profileContent } = opts;
+  const { profile } = opts;
+  // /new, /clear and session loads build the prompt without options; FLINT.md
+  // used to be read in here, so they kept it, and the host's instructions
+  // must survive them the same way.
+  const hostPrompt = opts.hostPrompt ?? app.hostPrompt;
+  const profileContent = [opts.profileContent, hostPrompt].filter(Boolean).join("\n\n");
   const osInfo = getOsInfo();
 
   const parts = [];
 
-  // Core prompt loaded from system.md (no hardcoded instructions in code)
+  // Who the agent is comes from the host (FLINT.md, CLAUDE.md, --system-prompt).
+  // Only Flint started with none of them is FLINT: a host's agent that read
+  // "You are FLINT" first kept introducing itself as FLINT.
+  if (!hostPrompt) parts.push(FLINT_IDENTITY, "");
+
+  // Core prompt loaded from system.md: how to work, not who the agent is.
   const systemMd = loadSystemMd();
-  if (systemMd) {
-    parts.push(systemMd);
-  } else {
-    parts.push("You are FLINT, a technical AI agent that executes tasks using available tools.");
-  }
+  if (systemMd) parts.push(systemMd);
 
-  // Project rules (FLINT.md) — immediately after system.md, before profile.
-  // This is the agent's own project notebook: facts about the current
-  // project, conventions, server names, workspace identifiers, shortcuts.
-  // Trusted because it's maintained by the agent itself (scanned for
-  // injection). Placed high in the prompt so it's not lost in context
-  // middle. See src/agent/project-context.js for the loader.
-  // The folder the agent works in (config.baseDir: where Flint was started, or
-  // --cwd), not process.cwd(), which is Flint's own install folder.
+  // The agent's own notes (.flint/notes.md), right after system.md so they are
+  // not lost in the middle of the context. The folder the agent works in
+  // (config.baseDir: where Flint was started, or --cwd), not process.cwd(),
+  // which is Flint's own install folder.
   const workFolder = config.baseDir || process.cwd();
-  const flintMdBlock = formatFlintMdBlock(workFolder);
-  if (flintMdBlock) {
+  const notesBlock = formatNotesBlock(workFolder);
+  if (notesBlock) {
     parts.push("");
-    parts.push(flintMdBlock);
+    parts.push(notesBlock);
   }
 
-  // Profile prompt (injected from profile .md file)
+  // Profile prompt (injected from profile .md file), then the host's
+  // instructions, which say themselves that they take precedence.
   if (profileContent) {
     parts.push("");
     parts.push(`--- ROLE: ${profile || "custom"} ---`);

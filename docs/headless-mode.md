@@ -21,6 +21,8 @@ flint --headless --task "<task description>" [options]
 | `--time-limit <n>` | Wall-clock limit in seconds, counted from the start of the task. When it passes the run ends: the model call or command in flight is aborted, commands the run started are killed, no further turn starts. |
 | `--port <n>` | HTTP API port for the run. |
 | `--data-dir <path>` | Directory for session/state files (defaults to `~/.flint`). |
+| `--system-prompt`, `--system-prompt-file`, `--append-system-prompt`, `--append-system-prompt-file` | The host's instructions, read with the `FLINT.md` files of `--cwd` (or, where there is none, its `CLAUDE.md` files) as in [stdio mode](stdio-mode.md#the-agents-folder). |
+| `--tools <list>`, `--disallowedTools <list>` | Which tools the agent has, as in [stdio mode](stdio-mode.md#the-agents-folder). |
 
 ## Exit codes
 

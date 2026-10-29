@@ -9,6 +9,34 @@ headings to show what changed between your version and the newest one.
 
 ## [Unreleased]
 
+## [1.16.0] - 2026-10-28
+
+### Added
+- `--tools` and `--disallowedTools` (stdio and headless) say which tools the
+  agent has, with Claude Code's meaning: `--tools` names the only ones,
+  `--disallowedTools` takes some away. A tool left out is not offered to the
+  model, `tool_search` does not find it, and a call to it is refused. Names
+  may be Flint's, Claude Code's (`Read`, `Bash`, `WebSearch`) or its MCP form
+  (`mcp__messaging`, `mcp__messaging__send`). `--allowedTools` stays accepted
+  and ignored: in Claude Code it means "run without asking". The
+  `FLINT_TOOL_ALLOWLIST` variable now also holds for `tool_search` and calls.
+
+### Changed
+- `FLINT.md` is the owner's instructions: who the agent is and how it works.
+  Flint reads every `FLINT.md` from the work folder up to the root, outermost
+  first, in every mode, and they take precedence over its defaults. Where
+  there is no `FLINT.md`, the `CLAUDE.md` files are read the same way (now in
+  the console too); a folder with both gives only `FLINT.md`.
+- "You are FLINT" is said only when there are no instructions (no `FLINT.md`,
+  no `CLAUDE.md`, no `--system-prompt`). An agent a host gives a name keeps
+  that name; `system.md` says how to work, not who the agent is.
+- The agent's own notes go to `.flint/notes.md` in the work folder, which it
+  reads and writes itself. They reach the prompt as untrusted context,
+  scanned for injected instructions, as `FLINT.md` used to.
+
+### Removed
+- `--sn-stdio-ephemeral-key-check`. A host checks the Flint version instead.
+
 ## [1.15.0] - 2026-10-19
 
 ### Added
