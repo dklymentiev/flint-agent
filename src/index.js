@@ -227,6 +227,7 @@ if (cli.action === "stdio") {
   const { mcpJsonServers, parseServerConfig } = await import("./mcp-client.js");
   try {
     app.hostPrompt = hostPromptFrom(cli);
+    app.corePrompt = cli.corePrompt;
     const mcpFile = mcpConfigPath(cli);
     if (mcpFile) {
       const fromFile = mcpJsonServers(JSON.parse(readFileSync(mcpFile, "utf-8")));

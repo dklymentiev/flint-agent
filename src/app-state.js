@@ -19,6 +19,7 @@ export const app = {
   autonomous: false, // TUI /auto only — NOT touched by API messages
   apiSelfContinue: false, // per-message API opt-in, set from body.autonomous
   apiGoalId: null, // goal ID created by current API task — stop when this goal completes
+  corePrompt: "full", // "host" when a host program runs Flint (--core-prompt host)
 };
 
 // Session data snapshot -- used by multiple modules for saving

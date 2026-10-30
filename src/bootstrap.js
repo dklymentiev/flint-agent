@@ -576,6 +576,7 @@ export async function bootstrap(cli, pkg) {
     const { launchIdentityOrExit } = await import("./launch-identity.js");
     const identity = launchIdentityOrExit(cli, config.mcpServers);
     app.hostPrompt = identity.hostPrompt;
+    app.corePrompt = identity.corePrompt;
     config.mcpServers = identity.mcpServers;
   } else if (cli.action !== "stdio") {
     // The console reads the same instruction files from the folder it was

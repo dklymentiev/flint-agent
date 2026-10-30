@@ -14,7 +14,7 @@ flint --print --verbose --model <model id> \
       [--session-id <id> | --resume <id>] [--dangerously-skip-permissions] \
       [--system-prompt-file <path>] [--append-system-prompt <text>] \
       [--mcp-config <path>] [--cwd <folder>] \
-      [--tools <list>] [--disallowedTools <list>]
+      [--tools <list>] [--disallowedTools <list>] [--core-prompt=host]
 ```
 
 `--stdio` alone means the same. `flint` (bin/flint.js) runs this mode in its
@@ -40,6 +40,11 @@ The process works in the folder it is started in (or `--cwd`):
   agent's identity and role and take precedence over its defaults (name, role,
   how to answer). Flint's prompt stays, because it says how to work with its
   tools, but with instructions present it does not call the agent FLINT.
+  `--core-prompt=host` (since 1.16.1) shortens Flint's prompt for a host
+  program: the parts written for Flint run on its own (repairing and
+  restarting itself, the list of its own features) are left out. `full`, the
+  default, keeps everything. Another value exits with code 2. Older versions
+  ignore the `=` form.
 - **Notes**: `.flint/notes.md` in the folder is the agent's own notebook. It
   reads and writes it itself, and it is put into the prompt as untrusted
   context, scanned for injected instructions.

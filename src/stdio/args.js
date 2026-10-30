@@ -18,8 +18,21 @@ const VALUE_FLAGS = new Set([
   "--append-system-prompt", "--append-system-prompt-file", "--mcp-config", "--input-format",
   "--output-format", "--cwd", "--max-turns", "--add-dir", "--permission-mode",
   "--allowedTools", "--allowed-tools", "--disallowedTools", "--disallowed-tools", "--tools",
-  "--fallback-model", "--settings", "--data-dir",
+  "--fallback-model", "--settings", "--data-dir", "--core-prompt",
 ]);
+
+/**
+ * Which core prompt (system.md) the agent gets. "full" is Flint on its own,
+ * talking to its operator. "host" is Flint run by a program that gives the
+ * agent its identity and owns its configuration: the parts of system.md marked
+ * interactive and Flint's description of itself are left out. Both ship with
+ * Flint and change with it; a host only chooses one.
+ */
+export function parseCorePrompt(value) {
+  if (value == null) return "full";
+  if (value === "full" || value === "host") return value;
+  throw new Error(`--core-prompt ${value} is not supported; use full or host`);
+}
 
 /** Session ids become file names: letters, digits, dash and underscore only. */
 export function isSafeSessionId(id) {
@@ -66,6 +79,7 @@ export function parseStdioArgs(argv) {
     mcpConfig: values["--mcp-config"] ?? null,
     cwd: values["--cwd"] ?? null,
     dataDir: values["--data-dir"] ?? null,
+    corePrompt: parseCorePrompt(values["--core-prompt"]),
     // Which tools the agent has (tools/tool-filter.js). --allowedTools only
     // means "without asking" and is accepted and ignored.
     tools: values["--tools"] ?? null,

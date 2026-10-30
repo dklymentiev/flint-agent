@@ -318,6 +318,38 @@ function _repairToolName(name, maxDistance = 2) {
   return null;
 }
 
+// What a name the model called refers to, decided before anybody is asked
+// about it. Returns { name } for a tool that can run, or { error } to answer
+// the model with.
+//
+// A name nobody registered used to reach the permission check and fall to its
+// default "confirm": the operator was asked about a tool that does not exist,
+// and a headless run ended the turn "waiting for approval" while the model was
+// never told the name was wrong.
+//
+// The second case is an MCP tool called by the server's own name: the server's
+// instructions say `inbox_reply`, Flint registered it as
+// `mcp_messaging_inbox_reply`. That is matched through the server each tool was
+// registered by, not by the end of the string (a server "a" tool "b_reply" and
+// a server "a_b" tool "reply" are both mcp_a_b_reply). Two servers with the
+// same tool name are not chosen between; the model is given both.
+export function resolveToolName(name) {
+  if (handlerMap[name]) {
+    return toolAllowed(name) ? { name } : { error: `Error: tool "${name}" is not available in this session` };
+  }
+  const full = getDefinitions()
+    .map((t) => t.function?.name)
+    .filter((n) => {
+      const server = mcpServerOf(n);
+      return server && n === `mcp_${server}_${name}`;
+    });
+  if (full.length === 1) return { name: full[0] };
+  if (full.length > 1) {
+    return { error: `Error: unknown tool "${name}". More than one MCP server has a tool of that name: ${full.join(", ")}. Call the one you mean by its full name.` };
+  }
+  return { error: `Error: unknown tool "${name}"` };
+}
+
 export async function executeTool(name, args) {
   if (handlerMap[name] && !toolAllowed(name)) {
     return `Error: tool "${name}" is not available in this session`;

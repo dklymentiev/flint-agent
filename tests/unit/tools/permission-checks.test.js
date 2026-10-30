@@ -22,8 +22,9 @@
 //   5. no bell and no window title while a prompt is open, so a prompt that
 //      needs attention is invisible when the operator has looked away
 
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeAll, beforeEach, afterEach } from "vitest";
 
+import { registerMcpTools } from "../../../src/tools/registry.js";
 import {
   initPermissions, setPermission, executeToolWithPermissions, resetPermissionState,
   saveOnboardingAnswer, getOnboardingAnswer, getOnboardingState, askOnboardingIfNeeded,
@@ -41,8 +42,20 @@ function mockConfirm(reply = false) {
   return asked;
 }
 
+// The tools the calls below use, registered with a handler that touches
+// nothing. A name nobody registered is answered "unknown tool" before any
+// permission is checked, so an unregistered read_file would test nothing.
+beforeAll(() => {
+  const names = ["read_file", "write_file", "web_fetch"];
+  registerMcpTools(
+    names.map((name) => ({ type: "function", function: { name, parameters: { type: "object", properties: {} } } })),
+    Object.fromEntries(names.map((name) => [name, async () => `ok:${name}`])),
+    [],
+  );
+});
+
 async function call(name, args) {
-  return executeToolWithPermissions(name, args, () => ({ ok: name }));
+  return executeToolWithPermissions(name, args, { sessionId: "" });
 }
 
 beforeEach(() => {

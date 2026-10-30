@@ -23,6 +23,7 @@ vi.mock("../../../src/config.js", () => ({
 
 vi.mock("../../../src/tools/registry.js", () => ({
   executeTool: (...args) => mockExecuteTool(...args),
+  resolveToolName: (name) => ({ name }),
   getDefinitions: () => [],
 }));
 

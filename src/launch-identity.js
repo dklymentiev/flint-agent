@@ -10,6 +10,7 @@
 
 import { readFileSync } from "node:fs";
 import { hostPromptFrom, mcpConfigPath } from "./stdio/session.js";
+import { parseCorePrompt } from "./stdio/args.js";
 import { mcpJsonServers, parseServerConfig } from "./mcp-client.js";
 
 /** Exit code of a launch whose flags or files cannot be used. */
@@ -30,9 +31,10 @@ function readInstructions(file) {
  * message is the whole sentence for the operator, file named.
  */
 export function readLaunchIdentity(cli, mcpServers) {
+  const corePrompt = parseCorePrompt(cli.corePrompt);
   const hostPrompt = hostPromptFrom(cli, { read: readInstructions });
   const mcpFile = mcpConfigPath(cli);
-  if (!mcpFile) return { hostPrompt, mcpServers };
+  if (!mcpFile) return { hostPrompt, mcpServers, corePrompt };
   let text;
   try {
     text = readFileSync(mcpFile, "utf8");
@@ -45,7 +47,7 @@ export function readLaunchIdentity(cli, mcpServers) {
   } catch (err) {
     throw new Error(`the MCP config ${mcpFile} is not valid JSON: ${err.message}`);
   }
-  return { hostPrompt, mcpServers: [...parseServerConfig(mcpServers), ...mcpJsonServers(parsed)] };
+  return { hostPrompt, mcpServers: [...parseServerConfig(mcpServers), ...mcpJsonServers(parsed)], corePrompt };
 }
 
 /**

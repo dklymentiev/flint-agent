@@ -22,19 +22,15 @@ vi.mock("../../../src/config.js", () => ({
   },
 }));
 
-vi.mock("../../../src/tools/registry.js", () => ({
-  executeTool: (...args) => mockExecuteTool(...args),
-  getDefinitions: () => [
-    { type: "function", function: { name: "read_file" } },
-    { type: "function", function: { name: "list_directory" } },
-    { type: "function", function: { name: "write_file" } },
-    { type: "function", function: { name: "run_command" } },
-    { type: "function", function: { name: "execute_command" } },
-    { type: "function", function: { name: "think" } },
-    { type: "function", function: { name: "search_in_files" } },
-    { type: "function", function: { name: "glob" } },
-  ],
-}));
+vi.mock("../../../src/tools/registry.js", () => {
+  const names = ["read_file", "list_directory", "write_file", "run_command", "execute_command", "think", "search_in_files", "glob"];
+  return {
+    executeTool: (...args) => mockExecuteTool(...args),
+    getDefinitions: () => names.map((name) => ({ type: "function", function: { name } })),
+    // The names above are the registered tools; anything else is unknown.
+    resolveToolName: (name) => (names.includes(name) ? { name } : { error: `Error: unknown tool "${name}"` }),
+  };
+});
 
 afterAll(() => {
   fs.rmSync(tmpBase, { recursive: true, force: true });

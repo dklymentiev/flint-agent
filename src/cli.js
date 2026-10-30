@@ -41,7 +41,10 @@ export function parseCLI() {
     const tools = (toolsIdx !== -1 && args[toolsIdx + 1] !== undefined) ? args[toolsIdx + 1] : null;
     const disallowedIdx = Math.max(args.indexOf("--disallowedTools"), args.indexOf("--disallowed-tools"));
     const disallowedTools = (disallowedIdx !== -1 && args[disallowedIdx + 1]) ? args[disallowedIdx + 1] : null;
-    return { action: "headless", task, cwd, budget, timeLimit, id: session, systemPrompt, systemPromptFile, appendSystemPrompt, appendSystemPromptFile, tools, disallowedTools };
+    // Checked in launch-identity.js, which ends a launch with a wrong value.
+    const corePromptIdx = args.indexOf("--core-prompt");
+    const corePrompt = corePromptIdx !== -1 ? (args[corePromptIdx + 1] ?? "") : null;
+    return { action: "headless", task, cwd, budget, timeLimit, id: session, systemPrompt, systemPromptFile, appendSystemPrompt, appendSystemPromptFile, tools, disallowedTools, corePrompt };
   }
   // Minimal runtime probe: verifies key, model, and tool round-trip without
   // running a full task. Exits with 0 (ok), 10 (no key), 11 (model did not

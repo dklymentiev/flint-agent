@@ -2,7 +2,7 @@
 
 import { existsSync, readFileSync, writeFileSync, appendFileSync, mkdirSync } from "node:fs";
 import path from "node:path";
-import { executeTool, getDefinitions } from "./registry.js";
+import { executeTool, getDefinitions, resolveToolName } from "./registry.js";
 import { mcpServerOf } from "./mcp-tool-servers.js";
 
 // ── Synonym table ────────────────────────────────────────────
@@ -615,9 +615,18 @@ export async function executeToolWithPermissions(name, args, { sessionId = "" } 
     synonym = name;
     name = realName;
   }
-  // 0b. Auto-repair: typo or slight variant, map to closest real name.
-  const repaired = _repairToolName(name);
-  if (repaired && repaired !== name) {
+  // 0b. What the name refers to: a registered tool, or an MCP tool called by
+  // its server's own name (see resolveToolName). Failing that, a typo repair.
+  // A name that is none of these is answered to the model here: it is not a
+  // question for the operator, and asking it is what left headless turns
+  // ending "waiting for approval" on a mistyped name.
+  const resolved = resolveToolName(name);
+  if (resolved.name) {
+    if (resolved.name !== name) console.error(`[tool-repair] '${name}' -> '${resolved.name}'`);
+    name = resolved.name;
+  } else {
+    const repaired = _repairToolName(name);
+    if (!repaired) return { result: resolved.error, denied: false, synonym, name };
     console.error(`[tool-repair] '${name}' -> '${repaired}'`);
     name = repaired;
   }

@@ -9,6 +9,23 @@ headings to show what changed between your version and the newest one.
 
 ## [Unreleased]
 
+## [1.16.1] - 2026-10-29
+
+### Added
+- `--core-prompt=host` (stdio and headless) gives a host program a shorter
+  core prompt: the parts written for Flint run on its own (repairing and
+  restarting itself, the list of its own features) are left out. `full`, the
+  default, is unchanged; another value exits with code 2.
+
+### Fixed
+- A call to a tool name that does not exist is answered to the model as an
+  error instead of asking the operator for approval. Run unattended, that
+  ask was refused and the turn ended with no answer.
+- An MCP tool called by its own name (`inbox_reply` for
+  `mcp_messaging_inbox_reply`) runs when exactly one connected server has it.
+  When several do, the model gets an error naming each full name, and
+  nothing runs.
+
 ## [1.16.0] - 2026-10-28
 
 ### Added

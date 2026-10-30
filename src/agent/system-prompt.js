@@ -34,6 +34,23 @@ import { app } from "../app-state.js";
 
 // --- System context (system.md — ships with Flint) ---
 
+// system.md for the chosen core prompt. Lines between `<!-- interactive -->`
+// and `<!-- /interactive -->` are for Flint on its own, talking to its
+// operator; a host program (--core-prompt host) owns the agent's configuration
+// and they are left out. The marker lines themselves never reach the model.
+export function corePromptText(md, corePrompt = "full") {
+  const out = [];
+  let interactive = false;
+  for (const line of md.split("\n")) {
+    const marker = line.trim();
+    if (marker === "<!-- interactive -->") { interactive = true; continue; }
+    if (marker === "<!-- /interactive -->") { interactive = false; continue; }
+    if (interactive && corePrompt === "host") continue;
+    out.push(line);
+  }
+  return out.join("\n");
+}
+
 function loadSystemMd() {
   // Only Flint's own copy. cwd used to be tried first, so any folder the user
   // started Flint in that held a file called system.md replaced the whole core
@@ -41,7 +58,7 @@ function loadSystemMd() {
   const p = join(new URL("../..", import.meta.url).pathname.replace(/^\/([A-Z]:)/, "$1"), "system.md");
   try {
     if (existsSync(p)) {
-      const text = readFileSync(p, "utf-8").trim();
+      const text = corePromptText(readFileSync(p, "utf-8"), app.corePrompt).trim();
       // With swap off the swap rule describes tools that are not there, and
       // FLINT_SWAP=0 promises the prompt as it was (docs/context-swap.md, A4).
       const base = swapEnabled() ? text : text.split("\n").filter((l) => !l.includes("swap_read")).join("\n");
@@ -317,7 +334,9 @@ export function getSystemMessage(sessionId, opts = {}) {
   // Flint architectural capabilities (from bundled README) — injected
   // so self-description questions have a live source without the agent
   // needing to guess or read an ambiguous README from the user's cwd.
-  const capabilitiesText = loadFlintCapabilities();
+  // Not under a host (--core-prompt host): the host gave the agent who it is,
+  // and Flint's own feature list is not that.
+  const capabilitiesText = app.corePrompt === "host" ? null : loadFlintCapabilities();
   if (capabilitiesText) {
     allocator.addSection(
       "flint-capabilities",

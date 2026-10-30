@@ -16,6 +16,7 @@ const mockExecuteTool = vi.fn(async (name) => `result:${name}`);
 vi.mock("../../../src/config.js", () => ({ config: mockConfig }));
 vi.mock("../../../src/tools/registry.js", () => ({
   executeTool: (...args) => mockExecuteTool(...args),
+  resolveToolName: (name) => ({ name }),
 }));
 
 afterAll(() => {
