@@ -309,7 +309,7 @@ Stopping a command stops its whole process tree.
 | Tool | Description | Permission |
 |------|-------------|------------|
 | `web_fetch` | Fetch a URL (GET or POST with a JSON body; 5000 characters by default) | allow |
-| `web_search` | Web search: DuckDuckGo, then Bing, then Google | allow |
+| `web_search` | Web search: the Brave Search API with `BRAVE_API_KEY`, else DuckDuckGo, then Bing, then Google pages | allow |
 | `think` | Step-by-step reasoning, not shown to the user | allow |
 | `check_balance` | OpenRouter credit balance and usage | allow |
 | `list_models` | Models of the current provider with pricing | allow |
@@ -537,6 +537,7 @@ Set in the environment or in `.env` in Flint's folder. Selected variables:
 | `OPENROUTER_PROVIDER_ONLY`, `_IGNORE`, `_ORDER`, `_SORT` | none | OpenRouter host routing for the main model |
 | `FLINT_FALLBACK_MODEL` | none | A second model the turn carries on with when the main one is unavailable. Unset: no fallback |
 | `INTENT_MODEL` | none | Classifier model that picks the tools per turn. Unset: the classifier is off |
+| `BRAVE_API_KEY` | none | `web_search` asks the Brave Search API with this key instead of reading search pages. Unset: DuckDuckGo, then Bing, then Google pages |
 | `FLINT_SPEND` | none | Spend level, overrides `/spend` |
 | `FLINT_SWAP` | on | `0` turns context swap off |
 | `FLINT_DATA_DIR` | none | Where sessions, tasks and memory go. Unset: everything in `~/.flint`, except in a git checkout you can write, which keeps its sessions next to itself. An npm install never keeps anything inside its own folder, because npm replaces that folder on every update |

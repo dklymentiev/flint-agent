@@ -713,7 +713,7 @@ Returns combined process (5) + system (12) + agent (4) tools and handlers.
 | Tool | Parameters | Description |
 |---|---|---|
 | `web_fetch` | `url, method?, body?, headers?, max_length?` | HTTP fetch with HTML-to-Markdown conversion. 2MB body limit. |
-| `web_search` | `query, num_results?` | Web search: DuckDuckGo first, then Bing, then Google (1 to 10 results, default 5) |
+| `web_search` | `query, num_results?` | Web search: the Brave Search API when `BRAVE_API_KEY` is set, else DuckDuckGo, then Bing, then Google pages (1 to 10 results, default 5) |
 | `restart_agent` | `reason` | Schedule agent restart |
 | `clear_context` | -- | Clear conversation history |
 | `check_balance` | -- | Check OpenRouter API balance |

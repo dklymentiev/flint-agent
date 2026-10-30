@@ -47,11 +47,11 @@ export class McpConfigError extends Error {
   }
 }
 
-/** Host identity reaches its MCP children; model provider keys do not. */
+/** Host identity reaches its MCP children; Flint's own keys (model providers, search) do not. */
 export function mcpChildEnv(serverEnv = {}, hostEnv = process.env) {
   const env = { ...hostEnv };
   for (const name of ["OPENROUTER_API_KEY", "OPENAI_API_KEY", "ANTHROPIC_API_KEY",
-    "CLAUDE_CODE_OAUTH_TOKEN"]) delete env[name];
+    "CLAUDE_CODE_OAUTH_TOKEN", "BRAVE_API_KEY"]) delete env[name];
   // A host may give an MCP server its *own* credential explicitly in .mcp.json.
   return { ...env, ...serverEnv };
 }

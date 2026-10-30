@@ -98,7 +98,7 @@ export function createSystemTools(store) {
       type: "function",
       function: {
         name: "web_search",
-        description: "Search the web using Google (with DuckDuckGo fallback). Returns titles, URLs and snippets for top results.",
+        description: "Search the web. Returns titles, URLs and snippets for top results.",
         parameters: {
           type: "object",
           properties: {
@@ -304,14 +304,39 @@ export function createSystemTools(store) {
       const UA_DESKTOP = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
       const UA_MOBILE = "Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0 Mobile Safari/537.36";
 
-      // DuckDuckGo first, then Bing, then Google. Bing answers a scraper with
-      // unrelated pages (2026-10-01: "Vitest test framework" returned hotel
-      // sites and Microsoft support pages, "Ink react terminal" returned
-      // printer ink) while the DuckDuckGo HTML endpoint returned the right
-      // results for the same queries.
-      let results = await _searchDDG(query, max, UA_DESKTOP);
-      if (!results.length) results = await _searchBing(query, max, UA_MOBILE);
-      if (!results.length) results = await _searchGoogle(query, max, UA_DESKTOP);
+      // With a search API key, the API alone: reading search pages is at the
+      // mercy of bot checks (2026-10-29, measured on two machines: DuckDuckGo
+      // silent for 15 s on one, a bot check on the other, and Bing's results
+      // weak). A failing API is reported, not covered by the pages.
+      const braveKey = process.env.BRAVE_API_KEY;
+      let results = [];
+      if (braveKey) {
+        const brave = await _searchBrave(query, max, braveKey);
+        if (brave.problem) return `Error: Brave Search: ${brave.problem}`;
+        results = brave.results;
+      } else {
+        // DuckDuckGo first, then Bing, then Google. Bing answers a scraper with
+        // unrelated pages (2026-10-01: "Vitest test framework" returned hotel
+        // sites and Microsoft support pages, "Ink react terminal" returned
+        // printer ink) while the DuckDuckGo HTML endpoint returned the right
+        // results for the same queries.
+        const problems = [];
+        for (const [engine, search, ua] of [
+          ["DuckDuckGo", _searchDDG, UA_DESKTOP],
+          ["Bing", _searchBing, UA_MOBILE],
+          ["Google", _searchGoogle, UA_DESKTOP],
+        ]) {
+          const r = await search(query, max, ua);
+          if (r.results.length) { results = r.results; break; }
+          problems.push(`${engine}: ${r.problem}`);
+        }
+        // Say why, so the model does not keep searching for what these pages
+        // will not give it from this machine.
+        if (!results.length) {
+          return `No results found for "${query}". ${problems.join("; ")}. ` +
+            "Search pages often refuse automated requests; a Brave Search API key in BRAVE_API_KEY avoids them.";
+        }
+      }
       if (!results.length) return `No results found for "${query}".`;
 
       const lines = [`Search results for "${query}":\n`];
@@ -540,19 +565,46 @@ function stripTags(html) {
   return html.replace(/<[^>]+>/g, "").trim();
 }
 
-async function _searchBing(query, max, ua) {
+// A search page read as HTML: { results } or { results: [], problem } with
+// what went wrong, for the model to see.
+async function _searchPage(url, ua, parse) {
   try {
-    const url = `https://www.bing.com/search?q=${encodeURIComponent(query)}&count=${max}`;
     const res = await fetch(url, {
       headers: { "User-Agent": ua },
       signal: AbortSignal.timeout(10000),
     });
-    if (!res.ok) return [];
-    const html = await res.text();
-    return parseBingHTML(html, max);
-  } catch {
-    return [];
+    if (!res.ok) return { results: [], problem: `HTTP ${res.status}` };
+    const results = parse(await res.text());
+    return results.length ? { results } : { results, problem: "a page with no results in it (a bot check, or nothing found)" };
+  } catch (err) {
+    return { results: [], problem: err.name === "TimeoutError" ? "no answer in 10 s" : err.message };
   }
+}
+
+// Brave Search API, https://api.search.brave.com (key from brave.com/search/api).
+async function _searchBrave(query, max, key) {
+  try {
+    const url = `https://api.search.brave.com/res/v1/web/search?q=${encodeURIComponent(query)}&count=${max}`;
+    const res = await fetch(url, {
+      headers: { Accept: "application/json", "X-Subscription-Token": key },
+      signal: AbortSignal.timeout(10000),
+    });
+    if (!res.ok) return { results: [], problem: `HTTP ${res.status} ${(await res.text()).slice(0, 200)}` };
+    const data = await res.json();
+    const results = (data.web?.results || []).slice(0, max).map((r) => ({
+      title: decodeHTMLEntities(stripTags(r.title || "")),
+      url: r.url,
+      snippet: decodeHTMLEntities(stripTags(r.description || "")).slice(0, 200),
+    }));
+    return { results };
+  } catch (err) {
+    return { results: [], problem: err.name === "TimeoutError" ? "no answer in 10 s" : err.message };
+  }
+}
+
+function _searchBing(query, max, ua) {
+  const url = `https://www.bing.com/search?q=${encodeURIComponent(query)}&count=${max}`;
+  return _searchPage(url, ua, (html) => parseBingHTML(html, max));
 }
 
 function parseBingHTML(html, max = 5) {
@@ -574,19 +626,9 @@ function parseBingHTML(html, max = 5) {
   return results;
 }
 
-async function _searchGoogle(query, max, ua) {
-  try {
-    const url = `https://www.google.com/search?q=${encodeURIComponent(query)}&num=${max}&hl=en`;
-    const res = await fetch(url, {
-      headers: { "User-Agent": ua },
-      signal: AbortSignal.timeout(10000),
-    });
-    if (!res.ok) return [];
-    const html = await res.text();
-    return parseGoogleHTML(html, max);
-  } catch {
-    return [];
-  }
+function _searchGoogle(query, max, ua) {
+  const url = `https://www.google.com/search?q=${encodeURIComponent(query)}&num=${max}&hl=en`;
+  return _searchPage(url, ua, (html) => parseGoogleHTML(html, max));
 }
 
 export function parseGoogleHTML(html, max = 5) {
@@ -618,19 +660,9 @@ export function parseGoogleHTML(html, max = 5) {
   return results;
 }
 
-async function _searchDDG(query, max, ua) {
-  try {
-    const url = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`;
-    const res = await fetch(url, {
-      headers: { "User-Agent": ua },
-      signal: AbortSignal.timeout(10000),
-    });
-    if (!res.ok) return [];
-    const html = await res.text();
-    return parseDDGHTML(html, max);
-  } catch {
-    return [];
-  }
+function _searchDDG(query, max, ua) {
+  const url = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`;
+  return _searchPage(url, ua, (html) => parseDDGHTML(html, max));
 }
 
 export function parseDDGHTML(html, max = 5) {

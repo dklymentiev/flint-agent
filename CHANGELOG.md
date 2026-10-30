@@ -9,6 +9,20 @@ headings to show what changed between your version and the newest one.
 
 ## [Unreleased]
 
+## [1.16.2] - 2026-10-29
+
+### Added
+- `BRAVE_API_KEY`: `web_search` asks the Brave Search API with this key and
+  reads no search pages. A failing API is reported as an error. Without the
+  key nothing changes.
+
+### Fixed
+- When DuckDuckGo, Bing and Google pages all give nothing, `web_search` says
+  why for each (no answer in 10 s, an HTTP status, a page without results)
+  instead of a bare "No results found", so the model stops searching again
+  for what those pages will not give it.
+- The `web_search` description no longer says it uses Google.
+
 ## [1.16.1] - 2026-10-29
 
 ### Added
