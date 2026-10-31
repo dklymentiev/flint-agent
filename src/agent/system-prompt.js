@@ -22,7 +22,6 @@ import { createBudgetAllocator } from "./prompt-budget.js";
 import { formatForPrompt as formatSkills, syncFromDisk as syncSkills } from "../memory/skills.js";
 import { formatForPrompt as formatFacts } from "../memory/facts.js";
 import { getCurrentProject } from "../memory/project.js";
-import { formatForPrompt as formatUserModel } from "../memory/user-model.js";
 import { compileRules, formatForPrompt as formatRules } from "../memory/rules.js";
 import { getDefinitions } from "../tools/registry.js";
 import { detectInjection } from "../security/content-fence.js";
@@ -401,14 +400,6 @@ export function getSystemMessage(sessionId, opts = {}) {
         ? `<trusted-context name="facts">\n[BLOCKED: facts failed injection scan (score ${scan.score})]\n</trusted-context>`
         : `<untrusted-context name="facts" source="user-extracted">\n${factsText}\n</untrusted-context>`;
       allocator.addSection("facts", text, { priority: 5, min: 100, max: 500 });
-    }
-  } catch {}
-
-  // Memory Layer 5: user model
-  try {
-    const userModelText = formatUserModel(0.5);
-    if (userModelText) {
-      allocator.addSection("user-profile", `<trusted-context name="user-profile">\n${userModelText}\n</trusted-context>`, { priority: 5, min: 50, max: 300 });
     }
   } catch {}
 

@@ -2,7 +2,6 @@
 
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { addFact, removeFact, getFacts, extractFacts, formatForPrompt as formatFacts } from "../../../src/memory/facts.js";
-import { observeUser, getProfile, formatForPrompt as formatProfile } from "../../../src/memory/user-model.js";
 import { closeDb, getAllFacts, getAllTraits } from "../../../src/memory/sqlite-store.js";
 
 import { getDb } from "../../../src/memory/sqlite-store.js";
@@ -50,52 +49,5 @@ describe("facts (Layer 4)", () => {
     expect(prompt).toContain("[preference]");
     expect(prompt).toContain("[environment]");
     expect(prompt).toContain("§");
-  });
-});
-
-describe("user-model (Layer 5)", () => {
-  beforeEach(() => {
-    const db = getDb();
-    db.exec("DELETE FROM user_model; DELETE FROM memory_fts WHERE layer='user_model';");
-  });
-
-  it("observeUser detects script from Cyrillic message", () => {
-    observeUser("Покажи мне все файлы в каталоге");
-    const profile = getProfile();
-    expect(profile.language?.value).toBe("cyrillic");
-  });
-
-  it("observeUser detects script from Latin message", () => {
-    observeUser("show me all files in the directory");
-    const profile = getProfile();
-    expect(profile.language?.value).toBe("latin");
-  });
-
-  it("observeUser detects mixed scripts", () => {
-    observeUser("Запусти command-line tool с parameters");
-    const profile = getProfile();
-    expect(profile.language?.value).toBe("cyrillic+latin");
-  });
-
-  it("observeUser detects terse style", () => {
-    observeUser("покажи файлы");
-    const profile = getProfile();
-    expect(profile.communication_style).toBeDefined();
-    expect(profile.communication_style.value).toBe("terse");
-  });
-
-  it("observeUser detects verbose style", () => {
-    const longMsg = Array(60).fill("word").join(" ");
-    observeUser(longMsg);
-    const profile = getProfile();
-    expect(profile.communication_style.value).toBe("verbose");
-  });
-
-  it("formatForPrompt filters by confidence", () => {
-    observeUser("some user message with enough words for a trait");
-    const prompt = formatProfile(0.3); // low threshold
-    expect(prompt).toContain("§");
-    const strict = formatProfile(0.99); // too strict
-    expect(strict).toBe("");
   });
 });

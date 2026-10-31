@@ -47,11 +47,6 @@ vi.mock("../../src/memory/facts.js", () => ({
   formatForPrompt: () => "",
 }));
 
-vi.mock("../../src/memory/user-model.js", () => ({
-  observeUser: () => {},
-  formatForPrompt: () => "",
-}));
-
 vi.mock("../../src/memory/patterns.js", () => ({
   recordPattern: () => {},
   compilePreferences: () => ({}),

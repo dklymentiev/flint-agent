@@ -20,7 +20,6 @@ vi.mock("../../src/config.js", () => ({
 }));
 vi.mock("../../src/agent/modes.js", () => ({ getModeForIntent: () => null, listModes: () => [] }));
 vi.mock("../../src/memory/facts.js", () => ({ extractFacts: () => [], addFact: () => {}, formatForPrompt: () => "" }));
-vi.mock("../../src/memory/user-model.js", () => ({ observeUser: () => {}, formatForPrompt: () => "" }));
 vi.mock("../../src/memory/patterns.js", () => ({ recordPattern: () => {}, compilePreferences: () => ({}), formatForPrompt: () => "" }));
 // The tools themselves are not the subject: the first is slow, the rest quick.
 vi.mock("../../src/tools/permissions.js", async (orig) => ({

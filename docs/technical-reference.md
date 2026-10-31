@@ -61,7 +61,7 @@ Key subsystems:
 - **Supervisor**: Zero-cost local pattern matching that injects hints after tool calls (e.g., "click without look", repeated actions). Off in the console until `/supervisor`; on for API messages.
 - **Flow Controller**: Unified loop detection (text, tool, desktop) and auto-continue decisions.
 - **Security**: `src/security/` holds the orchestrator (`index.js`), policies, safety constants, path guard, command guard, network guard, content fence, content validator, persona guard, watchdog, audit, pairing, API auth and child policy.
-- **Memory**: HMAC-protected JSONL for `memory_*` entries, per-session facts and conversation digests, and a SQLite store (`~/.flint/memory/`) for five memory layers: reflections, patterns, skills, facts and a user model.
+- **Memory**: HMAC-protected JSONL for `memory_*` entries, per-session facts and conversation digests, and a SQLite store (`~/.flint/memory/`) for four memory layers: reflections, patterns, skills and facts.
 - **Tasks**: SQLite-backed goals/tasks with subtasks, scheduling, daily focus, multi-goal support.
 - **Spend modes** (`src/spend.js`): economy, normal and generous set together how many MCP tools are offered whole and when compression and swap start.
 
@@ -513,7 +513,7 @@ Builds the complete system message. Sections are budgeted by `createBudgetAlloca
 6. Flint capabilities from the bundled README
 7. MEMORY.md head (persistent memories)
 8. Agent-memory pinned context
-9. Memory layers: reflections, patterns, skills index, facts, user model
+9. Memory layers: reflections, patterns, skills index, facts
 10. Per-turn mode rules for the intent class (`src/agent/modes.js`)
 11. Session facts
 12. Conversation digest
@@ -1085,7 +1085,6 @@ One SQLite database in `~/.flint/memory/` (or `<FLINT_DATA_DIR>/memory/`) holds 
 | 2 | `patterns.js` | Which tool a kind of request went to first |
 | 3 | `skills.js` | Reusable procedures, also kept as markdown files in `~/.flint/memory/skills/` |
 | 4 | `facts.js` | User and project facts, global or per project (`project.js`) |
-| 5 | `user-model.js` | Traits of the user observed over time |
 
 `rules.js` aggregates lessons from reflections into a ruleset, and `retrieval.js` adds per-turn hints from similar past requests. The prompt gets these sections as described under `getSystemMessage()`.
 

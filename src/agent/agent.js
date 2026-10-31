@@ -61,7 +61,6 @@ import { beginAction, getSpend, readUsage, contextWindow } from "./usage.js";
 import { recordPattern } from "../memory/patterns.js";
 import { isFailureResult } from "./learning.js";
 import { modelSeesImages, setModelSeesImages, isImageRefusal, stripImages, imageUnseenText } from "./vision.js";
-import { observeUser } from "../memory/user-model.js";
 import { extractFacts, addFact } from "../memory/facts.js";
 import { findSimilarRequests, formatRetrievalHint } from "../memory/retrieval.js";
 import { setProcessAbortSignal } from "../tools/process-tools.js";
@@ -403,14 +402,12 @@ export async function runAgent(messages, callbacks = {}, { sessionId, signal, se
       ? userMessageRaw.map(c => c.text || "").join(" ")
       : "");
 
-  // Memory Layer 4+5: observe user message for facts and traits
-  // - observeUser is sync (cheap language-neutral observation)
+  // Memory Layer 4: observe user message for facts
   // - extractFacts is async (LLM-based, semantic). Fire-and-forget: facts
   //   become available from the NEXT session.
   // Facts get project scope based on current project: project/tech/env/decision/
   // bug categories are scoped; preference/person/general stay global.
   try {
-    observeUser(userMessageText);
     extractFacts(userMessageText).then(async (extracted) => {
       const { getCurrentProject } = await import("../memory/project.js");
       const currentProject = getCurrentProject();

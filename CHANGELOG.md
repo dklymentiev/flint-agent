@@ -9,6 +9,17 @@ headings to show what changed between your version and the newest one.
 
 ## [Unreleased]
 
+## [1.16.3] - 2026-10-31
+
+### Fixed
+- The agent no longer answers in Latin to a message written in Latin letters.
+  Flint used to record the alphabet of each message as the user's "language"
+  and put it into the system prompt as "language: latin". A message counted
+  over the whole input, history included, could also mark a four-word message
+  "verbose". Both guesses are removed, together with the user profile block
+  of the prompt. Language and answer style come from settings or from the
+  agent's own preference notes (`memory_write`).
+
 ## [1.16.2] - 2026-10-29
 
 ### Added
