@@ -23,6 +23,10 @@ background service.
 
 Project page: https://klymentiev.com/projects/flint
 
+Run Flint, Claude Code and other agents on free models through one local
+router, [Wend router](https://github.com/dklymentiev/wend-router): [How to run an AI agent for free](https://klymentiev.com/blog/claude-code-free), a step-by-step
+guide, also as a free 10-page PDF.
+
 ---
 
 ## What it does
